@@ -341,15 +341,9 @@ const app = createApp({
         const currentPathInfo = ref(null);
         const pathNodes = ref([]);
         const pathEdges = ref([]);
-        const NODE_W = 140, NODE_H = 40;
-        const canvasW = 1600, canvasH = 780;
-        const zoom = ref(1);
-        const panX = ref(0), panY = ref(0);
-        // linking state (drag from anchor to node)
-        const linking = ref(false);
-        const linkFromId = ref(null);
-        const linkFromPos = reactive({ x: 0, y: 0 });
-        const linkToPos = reactive({ x: 0, y: 0 });
+        // LogicFlow instance (non-reactive)
+        let lfInstance = null;
+        let lfDragType = null;
         // branch picker
         const showBranchPicker = ref(false);
         const pendingLinkFrom = ref(null);
@@ -358,10 +352,6 @@ const app = createApp({
         const showNodeConfig = ref(false);
         const nodeConfigForm = reactive({ id: '', type: '', name: '', data_source_id: '', query_target: '', condition: '是否命中' });
         const pathCanvas = ref(null);
-        // drag states (non-reactive)
-        let toolbarDragType = null;
-        let nodeDragState = null;
-        let panState = null;
 
         const loadAllDataSources = async () => {
             try {
@@ -370,8 +360,8 @@ const app = createApp({
             } catch(e) { ElMessage.error(e.message); }
         };
 
-        const fillDsNames = () => {
-            for (const n of pathNodes.value) {
+        const fillDsNames = (nodes) => {
+            for (const n of nodes) {
                 if (n.data_source_id) {
                     const ds = allDataSources.value.find(d => d.id === n.data_source_id);
                     n.data_source_name = ds ? ds.name : '';
@@ -379,6 +369,182 @@ const app = createApp({
                     n.data_source_name = '';
                 }
             }
+            return nodes;
+        };
+
+        // ---- LogicFlow data conversion ----
+        // Our format <-> LogicFlow format
+        const toLfData = (nodes, edges) => {
+            const lfNodes = (nodes || []).map(n => ({
+                id: n.id,
+                type: n.type === 'judge' ? 'judge-node' : (n.type === 'start' ? 'start-node' : 'execute-node'),
+                x: n.x || 0, y: n.y || 0,
+                text: n.name || n.type,
+                properties: {
+                    nodeType: n.type,
+                    name: n.name,
+                    data_source_id: n.data_source_id || '',
+                    data_source_name: n.data_source_name || '',
+                    query_target: n.query_target || '',
+                    condition: n.condition || '',
+                },
+            }));
+            const lfEdges = (edges || []).map((e, i) => ({
+                id: 'e_' + (e.from || '') + '_' + (e.to || '') + '_' + i,
+                type: 'polyline',
+                sourceNodeId: e.from,
+                targetNodeId: e.to,
+                text: e.label || '',
+            }));
+            return { nodes: lfNodes, edges: lfEdges };
+        };
+        const fromLfData = (lfData) => {
+            const nodes = (lfData.nodes || []).map(n => {
+                const p = n.properties || {};
+                return {
+                    id: n.id,
+                    type: p.nodeType || (n.type === 'judge-node' ? 'judge' : n.type === 'start-node' ? 'start' : 'execute'),
+                    name: p.name || n.text || '',
+                    x: Math.round(n.x || 0), y: Math.round(n.y || 0),
+                    data_source_id: p.data_source_id || '',
+                    data_source_name: p.data_source_name || '',
+                    query_target: p.query_target || '',
+                    condition: p.condition || '',
+                };
+            });
+            const edges = (lfData.edges || []).map(e => ({
+                from: e.sourceNodeId,
+                to: e.targetNodeId,
+                label: e.text || '',
+            }));
+            return { nodes, edges };
+        };
+
+        // ---- LogicFlow init ----
+        const registerCustomNodes = (lf) => {
+            // Start node (blue rect)
+            lf.register({
+                type: 'start-node',
+                view: Core.RectNode,
+                model: class extends Core.RectNodeModel {
+                    getNodeStyle() {
+                        const s = super.getNodeStyle();
+                        s.fill = '#409EFF'; s.stroke = '#337ecc'; s.radius = 6;
+                        return s;
+                    }
+                    getTextStyle() {
+                        const t = super.getTextStyle();
+                        t.color = '#fff'; t.fontSize = 13;
+                        return t;
+                    }
+                },
+            });
+            // Execute node (green rect)
+            lf.register({
+                type: 'execute-node',
+                view: Core.RectNode,
+                model: class extends Core.RectNodeModel {
+                    getNodeStyle() {
+                        const s = super.getNodeStyle();
+                        s.fill = '#67C23A'; s.stroke = '#529b2e'; s.radius = 6;
+                        return s;
+                    }
+                    getTextStyle() {
+                        const t = super.getTextStyle();
+                        t.color = '#fff'; t.fontSize = 13;
+                        return t;
+                    }
+                },
+            });
+            // Judge node (orange diamond)
+            lf.register({
+                type: 'judge-node',
+                view: Core.DiamondNode,
+                model: class extends Core.DiamondNodeModel {
+                    getNodeStyle() {
+                        const s = super.getNodeStyle();
+                        s.fill = '#E6A23C'; s.stroke = '#b88230';
+                        return s;
+                    }
+                    getTextStyle() {
+                        const t = super.getTextStyle();
+                        t.color = '#fff'; t.fontSize = 13;
+                        return t;
+                    }
+                },
+            });
+        };
+
+        const initLogicFlow = () => {
+            if (!pathCanvas.value) return;
+            if (lfInstance) { try { lfInstance.clearData(); } catch(e){} }
+            lfInstance = new Core.LogicFlow({
+                container: pathCanvas.value,
+                grid: { size: 20, type: 'dot', config: { color: '#dcdfe6', thickness: 1 } },
+                edgeTextDraggable: true,
+                adjustEdge: true,
+                keyboard: { enabled: true },
+            });
+            registerCustomNodes(lfInstance);
+            lfInstance.setTheme({
+                edge: { stroke: '#409EFF', strokeWidth: 2 },
+                edgeText: { color: '#E6A23C', fontSize: 12, fontWeight: 'bold', background: { fill: '#fff', stroke: 'transparent', radius: 3 } },
+                polyline: { stroke: '#409EFF', strokeWidth: 2 },
+            });
+            // Events
+            lfInstance.on('node:dbclick', (ev) => {
+                const node = ev.data || ev;
+                if (node) openNodeConfig(node.id, node.properties || {});
+            });
+            lfInstance.on('node:contextmenu', (ev) => {
+                const node = ev.data || ev;
+                if (node && node.id) { lfInstance.deleteNode(node.id); syncCount(); }
+            });
+            lfInstance.on('edge:contextmenu', (ev) => {
+                const edge = ev.data || ev;
+                if (edge && edge.id) { lfInstance.deleteEdge(edge.id); syncCount(); }
+            });
+            lfInstance.on('connection', (ev) => {
+                const conn = ev.data || ev;
+                const srcId = conn.sourceNodeId || conn.source || '';
+                const tgtId = conn.targetNodeId || conn.target || '';
+                const edgeId = conn.id || '';
+                const srcModel = lfInstance.getNodeModelById(srcId);
+                const srcType = srcModel ? (srcModel.properties || {}).nodeType : '';
+                if (srcType === 'judge') {
+                    // Show branch picker
+                    pendingLinkFrom.value = { id: srcId, name: srcModel ? srcModel.text.value : '' };
+                    pendingLinkTo.value = { id: tgtId };
+                    showBranchPicker.value = true;
+                    // Store edge id for label application
+                    pendingEdgeId.value = edgeId;
+                }
+            });
+        };
+
+        // Pending edge id for branch label
+        const pendingEdgeId = ref(null);
+
+        const syncCount = () => {
+            if (!lfInstance) return;
+            const d = lfInstance.getGraphData();
+            pathNodes.value = (d.nodes || []).map(n => ({ id: n.id, type: (n.properties||{}).nodeType || 'execute' }));
+            pathEdges.value = (d.edges || []).map(e => ({ from: e.sourceNodeId, to: e.targetNodeId, label: (typeof e.text === 'string' ? e.text : (e.text && e.text.value) || '') }));
+        };
+
+        const onPathBuilderOpened = async () => {
+            await nextTick();
+            if (!pathCanvas.value) { ElMessage.error('画布容器未就绪'); return; }
+            initLogicFlow();
+            // Render existing path data
+            const lfData = toLfData(pathNodes.value, pathEdges.value);
+            lfInstance.render(lfData);
+            // Center view
+            try { lfInstance.fitView(20); } catch(e) {}
+        };
+
+        const onPathBuilderClosed = () => {
+            if (lfInstance) { try { lfInstance.clearData(); } catch(e){} lfInstance = null; }
         };
 
         const openPathBuilder = async (row) => {
@@ -387,161 +553,120 @@ const app = createApp({
             currentPathInfo.value = { name: row.name + '查询路径', status: 'draft' };
             pathNodes.value = [];
             pathEdges.value = [];
-            zoom.value = 1; panX.value = 0; panY.value = 0;
             await loadAllDataSources();
             try {
                 const res = await API('/api/scenes/' + row.id + '/paths');
                 if (res.data && res.data.length > 0) {
                     const p = res.data[0];
                     currentPathInfo.value = { id: p.id, name: p.name, status: p.status };
-                    pathNodes.value = JSON.parse(p.nodes || '[]');
+                    pathNodes.value = fillDsNames(JSON.parse(p.nodes || '[]'));
                     pathEdges.value = JSON.parse(p.edges || '[]');
                 } else {
-                    pathNodes.value = [
-                        { id: 'n_start', type: 'start', name: '开始', x: 40, y: 160 },
-                        { id: 'n_end', type: 'execute', name: '返回结果', x: 400, y: 160 },
-                    ];
+                    pathNodes.value = fillDsNames([
+                        { id: 'n_start', type: 'start', name: '开始', x: 100, y: 200 },
+                        { id: 'n_end', type: 'execute', name: '返回结果', x: 400, y: 200 },
+                    ]);
                     pathEdges.value = [{ from: 'n_start', to: 'n_end' }];
                 }
             } catch(e) { ElMessage.error(e.message); }
-            fillDsNames();
             showPathBuilder.value = true;
         };
 
-        // ---- canvas helpers ----
-        const canvasPos = (e) => {
+        // ---- toolbar drag to LogicFlow ----
+        const onDragStart = (e, type) => { lfDragType = type; e.dataTransfer.effectAllowed = 'copy'; };
+        const onDrop = (e) => {
+            if (!lfDragType || !lfInstance) return;
+            // Convert screen coords to LogicFlow canvas coords
             const rect = pathCanvas.value.getBoundingClientRect();
-            return { x: (e.clientX - rect.left - panX.value) / zoom.value, y: (e.clientY - rect.top - panY.value) / zoom.value };
+            const lfPoint = lfInstance.clientToLocalPoint ? lfInstance.clientToLocalPoint(e.clientX - rect.left, e.clientY - rect.top) : { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            addNode(lfDragType, lfPoint.x, lfPoint.y);
+            lfDragType = null;
         };
-        const nodePos = (id) => { const n = pathNodes.value.find(n => n.id === id); return n ? { x: n.x, y: n.y + NODE_H/2 } : { x: 0, y: 0 }; };
-        const nodeAnchorPos = (id) => { const n = pathNodes.value.find(n => n.id === id); return n ? { x: n.x + NODE_W, y: n.y + NODE_H/2 } : { x: 0, y: 0 }; };
 
-        // ---- toolbar drag-in ----
-        const dragStartNode = (e, type) => { toolbarDragType = type; e.dataTransfer.effectAllowed = 'copy'; };
-        const dropNode = (e) => {
-            if (!toolbarDragType) return;
-            const pos = canvasPos(e);
-            addNodeAt(toolbarDragType, pos.x, pos.y);
-            toolbarDragType = null;
-        };
-        const addNodeAt = (type, x, y) => {
+        const addNode = (type, x, y) => {
             const names = { start: '开始', execute: '执行节点', judge: '判断节点' };
-            const node = { id: 'n' + Date.now() + Math.floor(Math.random()*1000), type, name: names[type], x: Math.max(0, Math.round(x - NODE_W/2)), y: Math.max(0, Math.round(y - NODE_H/2)) };
-            if (type === 'judge') node.condition = '是否命中';
-            pathNodes.value.push(node);
+            const lfType = type === 'judge' ? 'judge-node' : (type === 'start' ? 'start-node' : 'execute-node');
+            const id = 'n' + Date.now() + Math.floor(Math.random() * 1000);
+            const props = { nodeType: type, name: names[type], data_source_id: '', data_source_name: '', query_target: '', condition: type === 'judge' ? '是否命中' : '' };
+            lfInstance.addNode({ id, type: lfType, x: Math.round(x), y: Math.round(y), text: names[type], properties: props });
+            syncCount();
             if (type !== 'start') ElMessage.info('双击节点可配置' + (type === 'execute' ? '查询数据源' : '判断条件'));
         };
 
-        // ---- node drag move ----
-        const startNodeDrag = (e, node) => {
-            if (linking.value) return;
-            const pos = canvasPos(e);
-            nodeDragState = { node, offX: pos.x - node.x, offY: pos.y - node.y };
-            const onMove = (ev) => {
-                if (!nodeDragState) return;
-                const p = canvasPos(ev);
-                nodeDragState.node.x = Math.max(0, Math.round(p.x - nodeDragState.offX));
-                nodeDragState.node.y = Math.max(0, Math.round(p.y - nodeDragState.offY));
-            };
-            const onUp = () => { nodeDragState = null; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
-            document.addEventListener('mousemove', onMove);
-            document.addEventListener('mouseup', onUp);
-        };
+        // ---- zoom ----
+        const lfZoom = (up) => { if (!lfInstance) return; lfInstance.zoom(up ? 1.2 : 0.8); };
+        const lfResetView = () => { if (!lfInstance) return; try { lfInstance.resetZoom(); lfInstance.resetTranslateX(); lfInstance.resetTranslateY(); } catch(e) {} try { lfInstance.fitView(20); } catch(e) {} };
 
-        // ---- canvas pan & zoom ----
-        const startCanvasPan = (e) => {
-            if (linking.value) { cancelLink(); return; }
-            panState = { sx: e.clientX, sy: e.clientY, px: panX.value, py: panY.value };
-        };
-        const onCanvasMouseMove = (e) => {
-            if (panState) {
-                panX.value = panState.px + (e.clientX - panState.sx);
-                panY.value = panState.py + (e.clientY - panState.sy);
-            }
-            if (linking.value) {
-                const p = canvasPos(e);
-                linkToPos.x = p.x; linkToPos.y = p.y;
-            }
-        };
-        const onCanvasMouseUp = () => { panState = null; };
-        const zoomCanvas = (d) => { zoom.value = Math.min(1.5, Math.max(0.5, +(zoom.value + d).toFixed(2))); };
-        const resetCanvasView = () => { zoom.value = 1; panX.value = 0; panY.value = 0; };
-
-        // ---- link (drag from anchor to node) ----
-        const startLink = (e, node) => {
-            linking.value = true;
-            linkFromId.value = node.id;
-            const a = nodeAnchorPos(node.id);
-            linkFromPos.x = a.x; linkFromPos.y = a.y;
-            const p = canvasPos(e);
-            linkToPos.x = p.x; linkToPos.y = p.y;
-        };
-        const endLink = (node) => {
-            if (!linking.value) return;
-            const fromId = linkFromId.value;
-            cancelLink();
-            if (!fromId || fromId === node.id) return;
-            if (pathEdges.value.some(ed => ed.from === fromId && ed.to === node.id)) { ElMessage.warning('该连线已存在'); return; }
-            const fromNode = pathNodes.value.find(n => n.id === fromId);
-            if (fromNode && fromNode.type === 'judge') {
-                pendingLinkFrom.value = fromNode;
-                pendingLinkTo.value = node;
-                showBranchPicker.value = true;
-            } else {
-                pathEdges.value.push({ from: fromId, to: node.id });
-            }
-        };
+        // ---- branch label ----
         const applyBranch = (label) => {
-            const from = pendingLinkFrom.value, to = pendingLinkTo.value;
             showBranchPicker.value = false;
-            pendingLinkFrom.value = null; pendingLinkTo.value = null;
-            if (!from || !to) return;
-            pathEdges.value = pathEdges.value.filter(ed => !(ed.from === from.id && ed.label === label));
-            pathEdges.value.push({ from: from.id, to: to.id, label });
+            if (pendingEdgeId.value && lfInstance) {
+                // Set edge text (label)
+                const edgeModel = lfInstance.getEdgeModelById ? lfInstance.getEdgeModelById(pendingEdgeId.value) : null;
+                if (edgeModel) {
+                    lfInstance.updateText ? lfInstance.updateText(pendingEdgeId.value, label) : null;
+                }
+            }
+            pendingLinkFrom.value = null;
+            pendingLinkTo.value = null;
+            pendingEdgeId.value = null;
+            syncCount();
         };
-        const cancelLink = () => { linking.value = false; linkFromId.value = null; };
 
-        // ---- delete nodes / edges ----
-        const deleteNode = (node) => {
-            pathNodes.value = pathNodes.value.filter(n => n.id !== node.id);
-            pathEdges.value = pathEdges.value.filter(e => e.from !== node.id && e.to !== node.id);
+        // ---- clear ----
+        const clearCanvas = () => {
+            if (lfInstance) lfInstance.clearData();
+            pathNodes.value = []; pathEdges.value = [];
         };
-        const deleteEdge = (idx) => { pathEdges.value.splice(idx, 1); };
-        const clearCanvas = () => { pathNodes.value = []; pathEdges.value = []; };
 
         // ---- node config ----
-        const openNodeConfig = (node) => {
-            nodeConfigForm.id = node.id;
-            nodeConfigForm.type = node.type;
-            nodeConfigForm.name = node.name;
-            nodeConfigForm.data_source_id = node.data_source_id || '';
-            nodeConfigForm.query_target = node.query_target || '';
-            nodeConfigForm.condition = node.condition || '是否命中';
+        const openNodeConfig = (nodeId, props) => {
+            const p = props || {};
+            const type = p.nodeType || 'execute';
+            nodeConfigForm.id = nodeId;
+            nodeConfigForm.type = type;
+            nodeConfigForm.name = p.name || '';
+            nodeConfigForm.data_source_id = p.data_source_id || '';
+            nodeConfigForm.query_target = p.query_target || '';
+            nodeConfigForm.condition = p.condition || '是否命中';
             showNodeConfig.value = true;
         };
         const applyNodeConfig = () => {
-            const node = pathNodes.value.find(n => n.id === nodeConfigForm.id);
-            if (!node) return;
-            node.name = nodeConfigForm.name;
-            if (node.type === 'execute') {
-                node.data_source_id = nodeConfigForm.data_source_id || '';
-                node.query_target = nodeConfigForm.query_target || '';
-                const ds = allDataSources.value.find(d => d.id === node.data_source_id);
-                node.data_source_name = ds ? ds.name : '';
+            if (lfInstance) {
+                const model = lfInstance.getNodeModelById(nodeConfigForm.id);
+                if (model) {
+                    // Update text (name)
+                    if (lfInstance.updateText) lfInstance.updateText(nodeConfigForm.id, nodeConfigForm.name);
+                    // Update properties
+                    const newProps = {
+                        nodeType: nodeConfigForm.type,
+                        name: nodeConfigForm.name,
+                        data_source_id: nodeConfigForm.data_source_id || '',
+                        data_source_name: '',
+                        query_target: nodeConfigForm.query_target || '',
+                        condition: nodeConfigForm.condition || '',
+                    };
+                    if (nodeConfigForm.type === 'execute' && nodeConfigForm.data_source_id) {
+                        const ds = allDataSources.value.find(d => d.id === nodeConfigForm.data_source_id);
+                        newProps.data_source_name = ds ? ds.name : '';
+                    }
+                    if (model.setProperties) model.setProperties(newProps);
+                }
             }
-            if (node.type === 'judge') node.condition = nodeConfigForm.condition;
             showNodeConfig.value = false;
+            syncCount();
         };
 
         // ---- save & publish ----
         const savePath = async () => {
-            if (!pathNodes.value.some(n => n.type === 'start')) { ElMessage.warning('路径需包含开始节点'); return; }
+            if (!lfInstance) { ElMessage.warning('画布未初始化'); return; }
+            // Export from LogicFlow and convert to our format
+            const lfData = lfInstance.getGraphData();
+            const { nodes: cleanNodes, edges: cleanEdges } = fromLfData(lfData);
+            if (!cleanNodes.some(n => n.type === 'start')) { ElMessage.warning('路径需包含开始节点'); return; }
+            syncCount();
             try {
-                const cleanNodes = pathNodes.value.map(n => ({
-                    id: n.id, type: n.type, name: n.name, x: n.x, y: n.y,
-                    data_source_id: n.data_source_id || '', query_target: n.query_target || '', condition: n.condition || '',
-                }));
-                const body = { name: currentPathInfo.value.name, nodes: JSON.stringify(cleanNodes), edges: JSON.stringify(pathEdges.value) };
+                const body = { name: currentPathInfo.value.name, nodes: JSON.stringify(cleanNodes), edges: JSON.stringify(cleanEdges) };
                 if (currentPathInfo.value.id) {
                     await API(`/api/scenes/${currentSceneId.value}/paths/${currentPathInfo.value.id}`, { method: 'PUT', body });
                 } else {
@@ -645,11 +770,10 @@ const app = createApp({
             showFieldDialog, fieldList, currentTplId, fieldForm, openFieldDialog, resetFieldForm, openEditField, saveField, deleteField,
             sceneList, scenePage, sceneTotal, loadScenes, showSceneDialog, sceneForm, openSceneDialog, saveScene, deleteScene, toggleScene,
             showPathBuilder, allDataSources, currentSceneId, currentSceneInfo, currentPathInfo, openPathBuilder,
-            pathNodes, pathEdges, zoom, panX, panY, canvasW, canvasH, pathCanvas,
-            dragStartNode, dropNode, startNodeDrag, startCanvasPan, onCanvasMouseMove, onCanvasMouseUp,
-            zoomCanvas, resetCanvasView, startLink, endLink, applyBranch, cancelLink,
-            linking, linkFromPos, linkToPos, nodePos, nodeAnchorPos,
-            deleteNode, deleteEdge, clearCanvas,
+            pathNodes, pathEdges, pathCanvas,
+            onDragStart, onDrop, lfZoom, lfResetView, applyBranch,
+            onPathBuilderOpened, onPathBuilderClosed,
+            clearCanvas,
             showBranchPicker, pendingLinkFrom, showNodeConfig, nodeConfigForm, openNodeConfig, applyNodeConfig,
             savePath, publishPath,
             conflictQuery, conflictList, conflictPage, conflictTotal, loadConflicts, resetConflictQuery, showConflictDetailDialog, conflictDetail, conflictLifecycle, viewConflictDetail, showProcessDialog, processForm, processConflict, submitProcessConflict,

@@ -5,10 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IP地址查询校准系统</title>
     <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <link rel="stylesheet" href="https://unpkg.com/@logicflow/core@2.0.0/dist/index.css">
     <link rel="stylesheet" href="/static/app.css">
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <script src="https://unpkg.com/element-plus"></script>
     <script src="https://unpkg.com/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+    <script src="https://unpkg.com/@logicflow/core@2.0.0/dist/index.min.js"></script>
 </head>
 <body>
 <div id="app">
@@ -652,53 +654,20 @@
         <template #footer><el-button @click="showSceneDialog=false">取消</el-button><el-button type="primary" @click="saveScene">保存</el-button></template>
     </el-dialog>
 
-    <!-- Visual Path Builder Dialog (drag-drop) -->
-    <el-dialog v-model="showPathBuilder" title="场景查询路径配置（可视化拖拽构建）" width="1150px" top="3vh">
+    <!-- Visual Path Builder Dialog (LogicFlow drag-drop) -->
+    <el-dialog v-model="showPathBuilder" title="场景查询路径配置（可视化拖拽构建）" width="1150px" top="3vh" @opened="onPathBuilderOpened" @closed="onPathBuilderClosed">
         <el-alert v-if="currentSceneInfo" :title="`场景: ${currentSceneInfo.name}（${currentSceneInfo.scene_type}）— 拖拽组件到画布编排查询流程: 哪类数据去哪个数据源查、判断什么后走哪条分支`" type="info" :closable="false" style="margin-bottom:10px"></el-alert>
         <div class="pb-toolbar">
-            <div class="pb-drag-item" draggable="true" @dragstart="dragStartNode($event,'start')"><el-icon><Flag/></el-icon>开始节点</div>
-            <div class="pb-drag-item" draggable="true" @dragstart="dragStartNode($event,'execute')"><el-icon><Cpu/></el-icon>执行节点</div>
-            <div class="pb-drag-item" draggable="true" @dragstart="dragStartNode($event,'judge')"><el-icon><Switch/></el-icon>判断节点</div>
-            <el-button size="small" @click="zoomCanvas(0.1)">放大</el-button>
-            <el-button size="small" @click="zoomCanvas(-0.1)">缩小</el-button>
-            <el-button size="small" @click="resetCanvasView">重置视图</el-button>
+            <div class="pb-drag-item" draggable="true" @dragstart="onDragStart($event,'start')"><el-icon><Flag/></el-icon>开始节点</div>
+            <div class="pb-drag-item" draggable="true" @dragstart="onDragStart($event,'execute')"><el-icon><Cpu/></el-icon>执行节点</div>
+            <div class="pb-drag-item" draggable="true" @dragstart="onDragStart($event,'judge')"><el-icon><Switch/></el-icon>判断节点</div>
+            <el-button size="small" @click="lfZoom(true)">放大</el-button>
+            <el-button size="small" @click="lfZoom(false)">缩小</el-button>
+            <el-button size="small" @click="lfResetView">重置视图</el-button>
             <el-button size="small" type="danger" @click="clearCanvas">清空画布</el-button>
-            <el-tag size="small" type="info">拖入组件 · 锚点拖拽连线 · 双击配置 · 右键删除</el-tag>
+            <el-tag size="small" type="info">拖入组件 · 拖拽锚点连线 · 双击配置 · 右键删除</el-tag>
         </div>
-        <div class="path-canvas" ref="pathCanvas"
-             @drop.prevent="dropNode" @dragover.prevent
-             @mousedown="startCanvasPan" @mousemove="onCanvasMouseMove" @mouseup="onCanvasMouseUp" @mouseleave="onCanvasMouseUp"
-             @contextmenu.prevent>
-            <div class="pb-inner" :style="{transform:`translate(${panX}px,${panY}px) scale(${zoom})`, transformOrigin:'0 0'}">
-                <svg class="path-edges" :width="canvasW" :height="canvasH">
-                    <defs><marker id="pb-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#409EFF"/></marker></defs>
-                    <g v-for="(edge,idx) in pathEdges" :key="idx" class="pb-edge">
-                        <line :x1="nodeAnchorPos(edge.from).x" :y1="nodeAnchorPos(edge.from).y"
-                              :x2="nodePos(edge.to).x" :y2="nodePos(edge.to).y"
-                              stroke="#409EFF" stroke-width="2" marker-end="url(#pb-arrow)"
-                              @contextmenu.prevent.stop="deleteEdge(idx)"/>
-                        <text v-if="edge.label" :x="(nodeAnchorPos(edge.from).x+nodePos(edge.to).x)/2"
-                              :y="(nodeAnchorPos(edge.from).y+nodePos(edge.to).y)/2 - 6"
-                              fill="#E6A23C" font-size="12" font-weight="bold">{{edge.label}}</text>
-                    </g>
-                    <line v-if="linking" :x1="linkFromPos.x" :y1="linkFromPos.y" :x2="linkToPos.x" :y2="linkToPos.y" stroke="#909399" stroke-dasharray="5,4" stroke-width="2"/>
-                </svg>
-                <div v-for="node in pathNodes" :key="node.id"
-                     class="path-node" :class="'node-'+node.type"
-                     :style="{left: node.x+'px', top: node.y+'px'}"
-                     :title="node.type==='execute' ? (node.data_source_name?('数据源: '+node.data_source_name):'双击配置查询数据源') : (node.condition||'')"
-                     @mousedown.stop="startNodeDrag($event, node)"
-                     @mouseup.stop="endLink(node)"
-                     @dblclick.stop="openNodeConfig(node)"
-                     @contextmenu.prevent.stop="deleteNode(node)">
-                    <el-icon><component :is="node.type==='start'?'Flag':node.type==='judge'?'Switch':'Cpu'"/></el-icon>
-                    <span class="pb-node-name">{{ node.name }}</span>
-                    <div class="node-anchor" title="从此处拖拽连线到目标节点" @mousedown.stop.prevent="startLink($event, node)"></div>
-                    <div class="node-ds" v-if="node.data_source_name">{{node.data_source_name}}</div>
-                    <div class="node-cond" v-if="node.condition">{{node.condition}}</div>
-                </div>
-            </div>
-        </div>
+        <div class="path-canvas" ref="pathCanvas" @drop.prevent="onDrop" @dragover.prevent @contextmenu.prevent></div>
         <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <el-input v-model="currentPathInfo.name" placeholder="路径名称" style="width:240px"></el-input>
             <el-tag>节点: {{pathNodes.length}}</el-tag>
