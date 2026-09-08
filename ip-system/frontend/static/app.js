@@ -333,13 +333,35 @@ const app = createApp({
             try { await API('/api/scenes/' + row.id + '/toggle', { method: 'PUT' }); ElMessage.success('状态已切换'); loadScenes(scenePage.value); } catch(e) { ElMessage.error(e.message); }
         };
 
-        // Data Source Config (replacing path builder)
+        // Path Builder (visual drag-drop)
         const showPathBuilder = ref(false);
         const allDataSources = ref([]);
-        const selectedDsIds = ref([]);
         const currentSceneId = ref('');
         const currentSceneInfo = ref(null);
         const currentPathInfo = ref(null);
+        const pathNodes = ref([]);
+        const pathEdges = ref([]);
+        const NODE_W = 140, NODE_H = 40;
+        const canvasW = 1600, canvasH = 780;
+        const zoom = ref(1);
+        const panX = ref(0), panY = ref(0);
+        // linking state (drag from anchor to node)
+        const linking = ref(false);
+        const linkFromId = ref(null);
+        const linkFromPos = reactive({ x: 0, y: 0 });
+        const linkToPos = reactive({ x: 0, y: 0 });
+        // branch picker
+        const showBranchPicker = ref(false);
+        const pendingLinkFrom = ref(null);
+        const pendingLinkTo = ref(null);
+        // node config
+        const showNodeConfig = ref(false);
+        const nodeConfigForm = reactive({ id: '', type: '', name: '', data_source_id: '', query_target: '', condition: '是否命中' });
+        const pathCanvas = ref(null);
+        // drag states (non-reactive)
+        let toolbarDragType = null;
+        let nodeDragState = null;
+        let panState = null;
 
         const loadAllDataSources = async () => {
             try {
@@ -348,53 +370,194 @@ const app = createApp({
             } catch(e) { ElMessage.error(e.message); }
         };
 
+        const fillDsNames = () => {
+            for (const n of pathNodes.value) {
+                if (n.data_source_id) {
+                    const ds = allDataSources.value.find(d => d.id === n.data_source_id);
+                    n.data_source_name = ds ? ds.name : '';
+                } else {
+                    n.data_source_name = '';
+                }
+            }
+        };
+
         const openPathBuilder = async (row) => {
             currentSceneId.value = row.id;
             currentSceneInfo.value = row;
-            selectedDsIds.value = [];
-            currentPathInfo.value = { name: row.name + '查询数据源配置', status: 'draft' };
+            currentPathInfo.value = { name: row.name + '查询路径', status: 'draft' };
+            pathNodes.value = [];
+            pathEdges.value = [];
+            zoom.value = 1; panX.value = 0; panY.value = 0;
             await loadAllDataSources();
-            // Load existing config
             try {
                 const res = await API('/api/scenes/' + row.id + '/paths');
                 if (res.data && res.data.length > 0) {
                     const p = res.data[0];
                     currentPathInfo.value = { id: p.id, name: p.name, status: p.status };
-                    try {
-                        selectedDsIds.value = JSON.parse(p.data_source_ids || '[]');
-                    } catch(e) { selectedDsIds.value = []; }
+                    pathNodes.value = JSON.parse(p.nodes || '[]');
+                    pathEdges.value = JSON.parse(p.edges || '[]');
+                } else {
+                    pathNodes.value = [
+                        { id: 'n_start', type: 'start', name: '开始', x: 40, y: 160 },
+                        { id: 'n_end', type: 'execute', name: '返回结果', x: 400, y: 160 },
+                    ];
+                    pathEdges.value = [{ from: 'n_start', to: 'n_end' }];
                 }
             } catch(e) { ElMessage.error(e.message); }
+            fillDsNames();
             showPathBuilder.value = true;
         };
 
-        const toggleDsSelect = (id) => {
-            const idx = selectedDsIds.value.indexOf(id);
-            if (idx >= 0) {
-                selectedDsIds.value.splice(idx, 1);
-            } else {
-                selectedDsIds.value.push(id);
-            }
+        // ---- canvas helpers ----
+        const canvasPos = (e) => {
+            const rect = pathCanvas.value.getBoundingClientRect();
+            return { x: (e.clientX - rect.left - panX.value) / zoom.value, y: (e.clientY - rect.top - panY.value) / zoom.value };
+        };
+        const nodePos = (id) => { const n = pathNodes.value.find(n => n.id === id); return n ? { x: n.x, y: n.y + NODE_H/2 } : { x: 0, y: 0 }; };
+        const nodeAnchorPos = (id) => { const n = pathNodes.value.find(n => n.id === id); return n ? { x: n.x + NODE_W, y: n.y + NODE_H/2 } : { x: 0, y: 0 }; };
+
+        // ---- toolbar drag-in ----
+        const dragStartNode = (e, type) => { toolbarDragType = type; e.dataTransfer.effectAllowed = 'copy'; };
+        const dropNode = (e) => {
+            if (!toolbarDragType) return;
+            const pos = canvasPos(e);
+            addNodeAt(toolbarDragType, pos.x, pos.y);
+            toolbarDragType = null;
+        };
+        const addNodeAt = (type, x, y) => {
+            const names = { start: '开始', execute: '执行节点', judge: '判断节点' };
+            const node = { id: 'n' + Date.now() + Math.floor(Math.random()*1000), type, name: names[type], x: Math.max(0, Math.round(x - NODE_W/2)), y: Math.max(0, Math.round(y - NODE_H/2)) };
+            if (type === 'judge') node.condition = '是否命中';
+            pathNodes.value.push(node);
+            if (type !== 'start') ElMessage.info('双击节点可配置' + (type === 'execute' ? '查询数据源' : '判断条件'));
         };
 
+        // ---- node drag move ----
+        const startNodeDrag = (e, node) => {
+            if (linking.value) return;
+            const pos = canvasPos(e);
+            nodeDragState = { node, offX: pos.x - node.x, offY: pos.y - node.y };
+            const onMove = (ev) => {
+                if (!nodeDragState) return;
+                const p = canvasPos(ev);
+                nodeDragState.node.x = Math.max(0, Math.round(p.x - nodeDragState.offX));
+                nodeDragState.node.y = Math.max(0, Math.round(p.y - nodeDragState.offY));
+            };
+            const onUp = () => { nodeDragState = null; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        };
+
+        // ---- canvas pan & zoom ----
+        const startCanvasPan = (e) => {
+            if (linking.value) { cancelLink(); return; }
+            panState = { sx: e.clientX, sy: e.clientY, px: panX.value, py: panY.value };
+        };
+        const onCanvasMouseMove = (e) => {
+            if (panState) {
+                panX.value = panState.px + (e.clientX - panState.sx);
+                panY.value = panState.py + (e.clientY - panState.sy);
+            }
+            if (linking.value) {
+                const p = canvasPos(e);
+                linkToPos.x = p.x; linkToPos.y = p.y;
+            }
+        };
+        const onCanvasMouseUp = () => { panState = null; };
+        const zoomCanvas = (d) => { zoom.value = Math.min(1.5, Math.max(0.5, +(zoom.value + d).toFixed(2))); };
+        const resetCanvasView = () => { zoom.value = 1; panX.value = 0; panY.value = 0; };
+
+        // ---- link (drag from anchor to node) ----
+        const startLink = (e, node) => {
+            linking.value = true;
+            linkFromId.value = node.id;
+            const a = nodeAnchorPos(node.id);
+            linkFromPos.x = a.x; linkFromPos.y = a.y;
+            const p = canvasPos(e);
+            linkToPos.x = p.x; linkToPos.y = p.y;
+        };
+        const endLink = (node) => {
+            if (!linking.value) return;
+            const fromId = linkFromId.value;
+            cancelLink();
+            if (!fromId || fromId === node.id) return;
+            if (pathEdges.value.some(ed => ed.from === fromId && ed.to === node.id)) { ElMessage.warning('该连线已存在'); return; }
+            const fromNode = pathNodes.value.find(n => n.id === fromId);
+            if (fromNode && fromNode.type === 'judge') {
+                pendingLinkFrom.value = fromNode;
+                pendingLinkTo.value = node;
+                showBranchPicker.value = true;
+            } else {
+                pathEdges.value.push({ from: fromId, to: node.id });
+            }
+        };
+        const applyBranch = (label) => {
+            const from = pendingLinkFrom.value, to = pendingLinkTo.value;
+            showBranchPicker.value = false;
+            pendingLinkFrom.value = null; pendingLinkTo.value = null;
+            if (!from || !to) return;
+            pathEdges.value = pathEdges.value.filter(ed => !(ed.from === from.id && ed.label === label));
+            pathEdges.value.push({ from: from.id, to: to.id, label });
+        };
+        const cancelLink = () => { linking.value = false; linkFromId.value = null; };
+
+        // ---- delete nodes / edges ----
+        const deleteNode = (node) => {
+            pathNodes.value = pathNodes.value.filter(n => n.id !== node.id);
+            pathEdges.value = pathEdges.value.filter(e => e.from !== node.id && e.to !== node.id);
+        };
+        const deleteEdge = (idx) => { pathEdges.value.splice(idx, 1); };
+        const clearCanvas = () => { pathNodes.value = []; pathEdges.value = []; };
+
+        // ---- node config ----
+        const openNodeConfig = (node) => {
+            nodeConfigForm.id = node.id;
+            nodeConfigForm.type = node.type;
+            nodeConfigForm.name = node.name;
+            nodeConfigForm.data_source_id = node.data_source_id || '';
+            nodeConfigForm.query_target = node.query_target || '';
+            nodeConfigForm.condition = node.condition || '是否命中';
+            showNodeConfig.value = true;
+        };
+        const applyNodeConfig = () => {
+            const node = pathNodes.value.find(n => n.id === nodeConfigForm.id);
+            if (!node) return;
+            node.name = nodeConfigForm.name;
+            if (node.type === 'execute') {
+                node.data_source_id = nodeConfigForm.data_source_id || '';
+                node.query_target = nodeConfigForm.query_target || '';
+                const ds = allDataSources.value.find(d => d.id === node.data_source_id);
+                node.data_source_name = ds ? ds.name : '';
+            }
+            if (node.type === 'judge') node.condition = nodeConfigForm.condition;
+            showNodeConfig.value = false;
+        };
+
+        // ---- save & publish ----
         const savePath = async () => {
+            if (!pathNodes.value.some(n => n.type === 'start')) { ElMessage.warning('路径需包含开始节点'); return; }
             try {
-                const body = { name: currentPathInfo.value.name, data_source_ids: selectedDsIds.value };
+                const cleanNodes = pathNodes.value.map(n => ({
+                    id: n.id, type: n.type, name: n.name, x: n.x, y: n.y,
+                    data_source_id: n.data_source_id || '', query_target: n.query_target || '', condition: n.condition || '',
+                }));
+                const body = { name: currentPathInfo.value.name, nodes: JSON.stringify(cleanNodes), edges: JSON.stringify(pathEdges.value) };
                 if (currentPathInfo.value.id) {
                     await API(`/api/scenes/${currentSceneId.value}/paths/${currentPathInfo.value.id}`, { method: 'PUT', body });
                 } else {
                     const res = await API(`/api/scenes/${currentSceneId.value}/paths`, { method: 'POST', body });
                     currentPathInfo.value.id = res.id;
                 }
-                ElMessage.success('数据源配置保存成功');
+                ElMessage.success('路径保存成功');
             } catch(e) { ElMessage.error(e.message); }
         };
 
         const publishPath = async () => {
             await savePath();
+            if (!currentPathInfo.value.id) return;
             try {
                 await API(`/api/scenes/${currentSceneId.value}/paths/${currentPathInfo.value.id}/publish`, { method: 'PUT' });
-                ElMessage.success('配置发布成功，查询路由已生效');
+                ElMessage.success('路径发布成功，查询流程已生效');
                 currentPathInfo.value.status = 'published';
             } catch(e) { ElMessage.error(e.message); }
         };
@@ -481,7 +644,14 @@ const app = createApp({
             templateList, tplPage, tplTotal, loadTemplates, showTemplateDialog, templateForm, openTemplateDialog, saveTemplate, deleteTemplate, showTemplateDetailDialog, templateDetail, viewTemplate,
             showFieldDialog, fieldList, currentTplId, fieldForm, openFieldDialog, resetFieldForm, openEditField, saveField, deleteField,
             sceneList, scenePage, sceneTotal, loadScenes, showSceneDialog, sceneForm, openSceneDialog, saveScene, deleteScene, toggleScene,
-            showPathBuilder, allDataSources, selectedDsIds, currentSceneId, currentSceneInfo, currentPathInfo, openPathBuilder, toggleDsSelect, savePath, publishPath,
+            showPathBuilder, allDataSources, currentSceneId, currentSceneInfo, currentPathInfo, openPathBuilder,
+            pathNodes, pathEdges, zoom, panX, panY, canvasW, canvasH, pathCanvas,
+            dragStartNode, dropNode, startNodeDrag, startCanvasPan, onCanvasMouseMove, onCanvasMouseUp,
+            zoomCanvas, resetCanvasView, startLink, endLink, applyBranch, cancelLink,
+            linking, linkFromPos, linkToPos, nodePos, nodeAnchorPos,
+            deleteNode, deleteEdge, clearCanvas,
+            showBranchPicker, pendingLinkFrom, showNodeConfig, nodeConfigForm, openNodeConfig, applyNodeConfig,
+            savePath, publishPath,
             conflictQuery, conflictList, conflictPage, conflictTotal, loadConflicts, resetConflictQuery, showConflictDetailDialog, conflictDetail, conflictLifecycle, viewConflictDetail, showProcessDialog, processForm, processConflict, submitProcessConflict,
             logQuery, logList, logPage, logTotal, loadLogs, resetLogQuery,
             securityTab, securityConfig, loadSecurityConfig, saveSecurityConfig, ipAccessList, loadIpAccess, showIpAccessDialog, ipAccessForm, openIpAccessDialog, saveIpAccess, toggleIpAccess, deleteIpAccess,

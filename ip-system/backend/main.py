@@ -103,6 +103,80 @@ def detect_scene_by_ip(conn, ip):
     return None
 
 
+def execute_scene_path(conn, nodes, edges, ip, req):
+    """Execute a published scene query path by walking its nodes/edges.
+
+    - start node: entry point
+    - execute node: query the bound data source (哪类数据去哪个数据源查)
+    - judge node: branch by '是否命中' condition label (判断什么后该查哪里)
+    Returns (results, records) where records is a list of tuples:
+    (node_name, node_type, status, detail, data_source).
+    """
+    results = []
+    records = []
+    node_map = {n["id"]: n for n in nodes if isinstance(n, dict)}
+    edges_from = {}
+    for e in edges:
+        if isinstance(e, dict) and e.get("from"):
+            edges_from.setdefault(e["from"], []).append(e)
+
+    current = next((n for n in nodes if isinstance(n, dict) and n.get("type") == "start"), None)
+    visited = set()
+    guard = 0
+    while current and guard < 100:
+        guard += 1
+        nid = current.get("id")
+        if nid in visited:  # loop protection
+            break
+        visited.add(nid)
+        ntype = current.get("type")
+        nname = current.get("name") or ntype or "节点"
+
+        if ntype == "start":
+            records.append((nname, "start", "success", "任务开始", "系统"))
+        elif ntype == "execute":
+            ds_id = current.get("data_source_id")
+            ds_name = None
+            if ds_id:
+                r = conn.execute("SELECT name FROM data_sources WHERE id=?", (ds_id,)).fetchone()
+                ds_name = r["name"] if r else None
+            if ds_name:
+                sql = "SELECT * FROM ip_subjects WHERE ip_address=? AND data_source=?"
+                params = [ip, ds_name]
+                if req.start_time and req.end_time:
+                    sql += " AND start_time <= ? AND end_time >= ?"
+                    params += [req.end_time, req.start_time]
+                rows = conn.execute(sql, params).fetchall()
+                results.extend(rows)
+                target = current.get("query_target") or "IP主体信息"
+                records.append((nname, "execute", "success", f"查询[{target}]于数据源[{ds_name}], 命中{len(rows)}条", ds_name))
+            else:
+                records.append((nname, "execute", "success", f"返回{len(results)}条定位结果", "系统"))
+        elif ntype == "judge":
+            hit = len(results) > 0
+            label = "命中" if hit else "未命中"
+            cond = current.get("condition") or "是否命中"
+            outs = edges_from.get(nid, [])
+            edge = next((e for e in outs if (e.get("label") or "") == label), None)
+            if edge is None:
+                edge = outs[0] if outs else None
+            records.append((nname, "judge", "success", f"判断[{cond}]: {label}, 走[{label}]分支", "系统"))
+            if edge:
+                current = node_map.get(edge.get("to"))
+                continue
+            break
+        else:
+            records.append((nname, ntype or "execute", "success", str(current.get("detail") or ""), "系统"))
+
+        # non-judge node: follow first outgoing edge
+        outs = edges_from.get(nid, [])
+        if outs:
+            current = node_map.get(outs[0].get("to"))
+        else:
+            break
+    return results, records
+
+
 # ============ Auth (simplified) ============
 class LoginRequest(BaseModel):
     username: str
@@ -152,10 +226,10 @@ def create_query_task(req: QueryTaskRequest, request: Request):
         if not scene_type:
             scene_type = detect_scene_by_ip(conn, ip)
 
-        # Resolve the published data source configuration for this scene
-        ds_names = []
-        path_config_name = "未配置"
-        has_published_config = False
+        # Resolve the published visual query path for this scene and execute it
+        results = []
+        records = []
+        path_name = None
         if scene_type:
             scene = conn.execute("SELECT * FROM scenes WHERE scene_type=? AND status='enabled'", (scene_type,)).fetchone()
             if scene:
@@ -164,36 +238,39 @@ def create_query_task(req: QueryTaskRequest, request: Request):
                     (scene["id"],),
                 ).fetchone()
                 if path:
-                    has_published_config = True
-                    path_config_name = path["name"]
                     try:
-                        ds_ids = json.loads(path["data_source_ids"] or "[]")
+                        nodes = json.loads(path["nodes"] or "[]")
                     except Exception:
-                        ds_ids = []
-                    if ds_ids:
-                        placeholders = ",".join(["?"] * len(ds_ids))
-                        ds_rows = conn.execute(f"SELECT name FROM data_sources WHERE id IN ({placeholders})", ds_ids).fetchall()
-                        ds_names = [r["name"] for r in ds_rows]
+                        nodes = []
+                    try:
+                        edges = json.loads(path["edges"] or "[]")
+                    except Exception:
+                        edges = []
+                    if nodes:
+                        path_name = path["name"]
+                        results, records = execute_scene_path(conn, nodes, edges, ip, req)
+                        # Prepend scene identification record
+                        records.insert(0, ("场景识别", "judge", "success", f"场景类型: {scene_type} (路径: {path_name})", "系统"))
 
-        # Query ip_subjects, routed by configured data sources
-        sql = "SELECT * FROM ip_subjects WHERE ip_address=?"
-        params = [ip]
-        if req.start_time and req.end_time:
-            sql += " AND start_time <= ? AND end_time >= ?"
-            params += [req.end_time, req.start_time]
-        if scene_type:
-            sql += " AND scene_type=?"
-            params += [scene_type]
-        # If the scene has a published data source config, always apply the filter.
-        # If no data source is selected, the query returns no results (no data source to query).
-        if has_published_config:
-            if ds_names:
-                placeholders = ",".join(["?"] * len(ds_names))
-                sql += f" AND data_source IN ({placeholders})"
-                params += ds_names
-            else:
-                sql += " AND 1=0"
-        results = conn.execute(sql, params).fetchall()
+        # Fallback: no published path -> query all data sources of this scene
+        if not records:
+            sql = "SELECT * FROM ip_subjects WHERE ip_address=?"
+            params = [ip]
+            if req.start_time and req.end_time:
+                sql += " AND start_time <= ? AND end_time >= ?"
+                params += [req.end_time, req.start_time]
+            if scene_type:
+                sql += " AND scene_type=?"
+                params += [scene_type]
+            results = conn.execute(sql, params).fetchall()
+            ds_desc = ",".join(sorted({r["data_source"] for r in results})) if results else "无匹配数据源"
+            records = [
+                ("开始", "start", "success", "任务开始", "系统"),
+                ("场景识别", "judge", "success", f"场景类型: {scene_type or '未识别'} (未配置发布路径, 查询场景全部数据源)", "系统"),
+                ("数据源查询", "execute", "success" if results else "failed", f"查询数据源: {ds_desc}", ds_desc),
+                ("数据融合", "execute", "success" if results else "failed", f"命中{len(results)}条记录", "融合算法"),
+                ("返回结果", "execute", "success", f"返回{len(results)}条定位结果", "系统"),
+            ]
 
         # Create task
         task_name = req.task_name or f"查询-{ip}"
@@ -203,22 +280,14 @@ def create_query_task(req: QueryTaskRequest, request: Request):
             (task_id, task_name, ip, ip_ver, req.port or "", req.start_time, req.end_time, scene_type or "", "completed", len(results), "admin", now_str(), now_str()),
         )
 
-        # Create path records reflecting the actual data sources queried
-        ds_desc = ",".join(ds_names) if ds_names else "无匹配数据源"
-        path_nodes = [
-            ("开始", "start", "success", "任务开始", "系统", now_str()),
-            ("场景识别", "judge", "success", f"场景类型: {scene_type or '未识别'}", "系统", now_str()),
-            ("数据源查询", "execute", "success" if ds_names else "failed", f"路由数据源: {ds_desc}", ds_desc, now_str()),
-            ("数据融合", "execute", "success" if results else "failed", f"命中{len(results)}条记录", "融合算法", now_str()),
-            ("返回结果", "execute", "success", f"返回{len(results)}条定位结果", "系统", now_str()),
-        ]
-        for pn in path_nodes:
+        # Create path records from actual execution flow
+        for rec in records:
             conn.execute(
                 "INSERT INTO task_paths (id, task_id, node_name, node_type, status, detail, data_source, started_at, completed_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                (gen_id("tp_"), task_id, pn[0], pn[1], pn[2], pn[3], pn[4], pn[5], now_str()),
+                (gen_id("tp_"), task_id, rec[0], rec[1], rec[2], rec[3], rec[4], now_str(), now_str()),
             )
 
-        log_operation(conn, "查询", "admin", str(request.url), f"创建IP查询任务: {ip} (场景:{scene_type or '未识别'}, 数据源:{ds_desc})", get_client_ip(request))
+        log_operation(conn, "查询", "admin", str(request.url), f"创建IP查询任务: {ip} (场景:{scene_type or '未识别'}, 路径:{path_name or '默认流程'})", get_client_ip(request))
 
         # Mask sensitive fields in results
         masked_results = []
@@ -230,7 +299,7 @@ def create_query_task(req: QueryTaskRequest, request: Request):
             "task_id": task_id,
             "results": masked_results,
             "count": len(results),
-            "paths": parse_list(conn.execute("SELECT * FROM task_paths WHERE task_id=? ORDER BY id", (task_id,)).fetchall()),
+            "paths": parse_list(conn.execute("SELECT * FROM task_paths WHERE task_id=? ORDER BY rowid", (task_id,)).fetchall()),
         }
 
 
@@ -243,7 +312,7 @@ def get_task_detail(task_id: str, request: Request):
             raise HTTPException(404, "任务不存在")
         # Re-query results
         results = conn.execute("SELECT * FROM ip_subjects WHERE ip_address=?", (task["ip_address"],)).fetchall()
-        paths = conn.execute("SELECT * FROM task_paths WHERE task_id=? ORDER BY id", (task_id,)).fetchall()
+        paths = conn.execute("SELECT * FROM task_paths WHERE task_id=? ORDER BY rowid", (task_id,)).fetchall()
         return {
             "task": dict(task),
             "results": parse_list(results),
@@ -304,7 +373,7 @@ def get_task_path(task_id: str, request: Request):
         task = conn.execute("SELECT * FROM query_tasks WHERE id=?", (task_id,)).fetchone()
         if not task:
             raise HTTPException(404, "任务不存在")
-        paths = conn.execute("SELECT * FROM task_paths WHERE task_id=? ORDER BY id", (task_id,)).fetchall()
+        paths = conn.execute("SELECT * FROM task_paths WHERE task_id=? ORDER BY rowid", (task_id,)).fetchall()
         return {
             "task": dict(task),
             "paths": parse_list(paths),
@@ -780,25 +849,14 @@ def toggle_scene(scene_id: str, request: Request):
 # Scene path management
 class ScenePathRequest(BaseModel):
     name: str
-    data_source_ids: List[str] = []
+    nodes: str = "[]"   # JSON string of path nodes
+    edges: str = "[]"    # JSON string of path edges
 
 
 @app.get("/api/scenes/{scene_id}/paths")
 def list_scene_paths(scene_id: str, request: Request):
     with get_conn() as conn:
         paths = parse_list(conn.execute("SELECT * FROM scene_paths WHERE scene_id=?", (scene_id,)).fetchall())
-        # Attach data source details for each path
-        for p in paths:
-            try:
-                ds_ids = json.loads(p.get("data_source_ids") or "[]")
-            except Exception:
-                ds_ids = []
-            if ds_ids:
-                placeholders = ",".join(["?"] * len(ds_ids))
-                ds_rows = conn.execute(f"SELECT id, name, source_type, authority_level FROM data_sources WHERE id IN ({placeholders})", ds_ids).fetchall()
-                p["data_sources"] = parse_list(ds_rows)
-            else:
-                p["data_sources"] = []
         return {"data": paths}
 
 
@@ -807,34 +865,34 @@ def create_scene_path(scene_id: str, req: ScenePathRequest, request: Request):
     with get_conn() as conn:
         pid = gen_id("sp_")
         conn.execute(
-            "INSERT INTO scene_paths (id, scene_id, name, data_source_ids, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
-            (pid, scene_id, req.name, json.dumps(req.data_source_ids, ensure_ascii=False), "draft", now_str(), now_str()),
+            "INSERT INTO scene_paths (id, scene_id, name, nodes, edges, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            (pid, scene_id, req.name, req.nodes, req.edges, "draft", now_str(), now_str()),
         )
-        log_operation(conn, "新增路径", "admin", str(request.url), f"新增场景数据源配置:{req.name}", get_client_ip(request))
-        return {"id": pid, "message": "配置创建成功"}
+        log_operation(conn, "新增路径", "admin", str(request.url), f"新增场景查询路径:{req.name}", get_client_ip(request))
+        return {"id": pid, "message": "路径创建成功"}
 
 
 @app.put("/api/scenes/{scene_id}/paths/{path_id}")
 def update_scene_path(scene_id: str, path_id: str, req: ScenePathRequest, request: Request):
     with get_conn() as conn:
-        conn.execute("UPDATE scene_paths SET name=?, data_source_ids=?, updated_at=? WHERE id=?", (req.name, json.dumps(req.data_source_ids, ensure_ascii=False), now_str(), path_id))
-        log_operation(conn, "编辑路径", "admin", str(request.url), f"编辑场景数据源配置:{req.name}", get_client_ip(request))
-        return {"message": "配置更新成功"}
+        conn.execute("UPDATE scene_paths SET name=?, nodes=?, edges=?, updated_at=? WHERE id=?", (req.name, req.nodes, req.edges, now_str(), path_id))
+        log_operation(conn, "编辑路径", "admin", str(request.url), f"编辑场景查询路径:{req.name}", get_client_ip(request))
+        return {"message": "路径更新成功"}
 
 
 @app.delete("/api/scenes/{scene_id}/paths/{path_id}")
 def delete_scene_path(scene_id: str, path_id: str, request: Request):
     with get_conn() as conn:
         conn.execute("DELETE FROM scene_paths WHERE id=?", (path_id,))
-        return {"message": "配置删除成功"}
+        return {"message": "路径删除成功"}
 
 
 @app.put("/api/scenes/{scene_id}/paths/{path_id}/publish")
 def publish_scene_path(scene_id: str, path_id: str, request: Request):
     with get_conn() as conn:
         conn.execute("UPDATE scene_paths SET status='published', updated_at=? WHERE id=?", (now_str(), path_id))
-        log_operation(conn, "发布配置", "admin", str(request.url), f"发布场景数据源配置:{path_id}", get_client_ip(request))
-        return {"message": "配置发布成功，查询路由已生效"}
+        log_operation(conn, "发布路径", "admin", str(request.url), f"发布场景查询路径:{path_id}", get_client_ip(request))
+        return {"message": "路径发布成功，查询流程已生效"}
 
 
 @app.get("/api/scenes/{scene_id}/paths/{path_id}")
@@ -842,19 +900,8 @@ def get_scene_path(scene_id: str, path_id: str, request: Request):
     with get_conn() as conn:
         p = conn.execute("SELECT * FROM scene_paths WHERE id=? AND scene_id=?", (path_id, scene_id)).fetchone()
         if not p:
-            raise HTTPException(404, "配置不存在")
-        pd = dict(p)
-        try:
-            ds_ids = json.loads(pd.get("data_source_ids") or "[]")
-        except Exception:
-            ds_ids = []
-        if ds_ids:
-            placeholders = ",".join(["?"] * len(ds_ids))
-            ds_rows = conn.execute(f"SELECT id, name, source_type, authority_level FROM data_sources WHERE id IN ({placeholders})", ds_ids).fetchall()
-            pd["data_sources"] = parse_list(ds_rows)
-        else:
-            pd["data_sources"] = []
-        return pd
+            raise HTTPException(404, "路径不存在")
+        return dict(p)
 
 
 # ============ 3. 数据校验能力 ============

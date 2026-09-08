@@ -2,7 +2,7 @@
 # Comprehensive system test for IP Address Query Calibration System
 # Covers all test items from Appendix 2 of the test plan
 
-BASE=http://localhost:8000
+BASE=${BASE_URL:-http://localhost:5001}
 TOKEN=""
 PASS=0
 FAIL=0
@@ -97,16 +97,17 @@ if echo "$RESP" | grep -q "id\|\["; then log_pass "5.1 场景列表"; else log_f
 SCENE_ID=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'] if d.get('data') else '')" 2>/dev/null)
 if [ -n "$SCENE_ID" ]; then
     RESP=$(auth_req GET "/api/scenes/$SCENE_ID/paths")
-    if echo "$RESP" | grep -q "data_source_ids\|data_sources"; then log_pass "5.2 场景数据源配置列表"; else log_fail "5.2 场景数据源配置列表"; fi
-    # Get a data source id for the new config
+    if echo "$RESP" | grep -q "nodes"; then log_pass "5.2 场景查询路径列表"; else log_fail "5.2 场景查询路径列表"; fi
+    # Get a data source id for the path node binding
     DS_RESP=$(auth_req GET "/api/datasources?page=1&page_size=1")
     DS_ID=$(echo "$DS_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'] if d.get('data') else '')" 2>/dev/null)
-    RESP=$(auth_req POST "/api/scenes/$SCENE_ID/paths" "{\"name\":\"测试数据源配置T\",\"data_source_ids\":[\"$DS_ID\"]}")
+    # Create a visual path: start -> exec(ds) -> judge -> end (with branch labels)
+    RESP=$(auth_req POST "/api/scenes/$SCENE_ID/paths" "{\"name\":\"测试路径T\",\"nodes\":\"[{\\\"id\\\":\\\"s1\\\",\\\"type\\\":\\\"start\\\",\\\"name\\\":\\\"开始\\\",\\\"x\\\":40,\\\"y\\\":100},{\\\"id\\\":\\\"e1\\\",\\\"type\\\":\\\"execute\\\",\\\"name\\\":\\\"查询数据源\\\",\\\"x\\\":260,\\\"y\\\":100,\\\"data_source_id\\\":\\\"$DS_ID\\\"},{\\\"id\\\":\\\"j1\\\",\\\"type\\\":\\\"judge\\\",\\\"name\\\":\\\"是否命中\\\",\\\"x\\\":480,\\\"y\\\":100,\\\"condition\\\":\\\"是否命中\\\"},{\\\"id\\\":\\\"r1\\\",\\\"type\\\":\\\"execute\\\",\\\"name\\\":\\\"返回结果\\\",\\\"x\\\":700,\\\"y\\\":100}]\",\"edges\":\"[{\\\"from\\\":\\\"s1\\\",\\\"to\\\":\\\"e1\\\"},{\\\"from\\\":\\\"e1\\\",\\\"to\\\":\\\"j1\\\"},{\\\"from\\\":\\\"j1\\\",\\\"to\\\":\\\"r1\\\",\\\"label\\\":\\\"命中\\\"},{\\\"from\\\":\\\"j1\\\",\\\"to\\\":\\\"r1\\\",\\\"label\\\":\\\"未命中\\\"}]\"}")
     PATH_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
-    if [ -n "$PATH_ID" ]; then log_pass "5.3 新增场景数据源配置"; else log_fail "5.3 新增场景数据源配置"; fi
+    if [ -n "$PATH_ID" ]; then log_pass "5.3 新增场景查询路径(含节点/连线/分支)"; else log_fail "5.3 新增场景查询路径(含节点/连线/分支)"; fi
     if [ -n "$PATH_ID" ]; then
         RESP=$(auth_req PUT "/api/scenes/$SCENE_ID/paths/$PATH_ID/publish")
-        if echo "$RESP" | grep -q "message\|success\|status"; then log_pass "5.4 配置发布生效"; else log_fail "5.4 配置发布生效"; fi
+        if echo "$RESP" | grep -q "message\|success\|status"; then log_pass "5.4 路径发布生效"; else log_fail "5.4 路径发布生效"; fi
     fi
 fi
 

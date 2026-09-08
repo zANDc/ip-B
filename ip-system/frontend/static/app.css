@@ -24,6 +24,28 @@ body { font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans G
 .stat-num { font-size: 28px; font-weight: bold; color: #303133; }
 .stat-label { font-size: 14px; color: #909399; }
 
+/* Path Builder */
+.pb-toolbar { margin-bottom: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pb-drag-item { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border: 1px dashed #409EFF; border-radius: 4px; color: #409EFF; font-size: 13px; cursor: grab; background: #ecf5ff; user-select: none; }
+.pb-drag-item:hover { background: #d9ecff; }
+.path-canvas { width: 100%; height: 480px; background: #f5f7fa; background-image: radial-gradient(circle, #dcdfe6 1px, transparent 1px); background-size: 20px 20px; border: 2px dashed #dcdfe6; position: relative; overflow: hidden; cursor: grab; }
+.path-canvas:active { cursor: grabbing; }
+.pb-inner { position: relative; width: 1600px; height: 780px; }
+.path-edges { position: absolute; top: 0; left: 0; pointer-events: none; }
+.path-edges line { pointer-events: stroke; cursor: pointer; }
+.path-edges line:hover { stroke: #f56c6c; }
+.pb-edge { cursor: pointer; }
+.path-node { position: absolute; width: 140px; height: 40px; display: flex; align-items: center; justify-content: center; gap: 5px; border-radius: 6px; color: #fff; cursor: pointer; font-size: 13px; user-select: none; box-shadow: 0 2px 8px rgba(0,0,0,0.15); transition: transform 0.05s; z-index: 2; }
+.path-node:hover { transform: scale(1.03); }
+.path-node .pb-node-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px; }
+.node-start { background: #409EFF; }
+.node-execute { background: #67C23A; }
+.node-judge { background: #E6A23C; }
+.node-anchor { position: absolute; right: -7px; top: 14px; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid #409EFF; cursor: crosshair; }
+.node-anchor:hover { background: #409EFF; }
+.node-ds { position: absolute; top: 42px; left: 0; font-size: 11px; color: #67C23A; white-space: nowrap; }
+.node-cond { position: absolute; top: 42px; left: 0; font-size: 11px; color: #E6A23C; white-space: nowrap; }
+
 /* Element Plus overrides */
 .el-menu { border-right: none !important; }
 .el-pagination { justify-content: flex-end; }

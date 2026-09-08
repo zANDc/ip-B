@@ -112,12 +112,13 @@ CREATE TABLE IF NOT EXISTS scenes (
     updated_at TEXT
 );
 
--- 场景查询路径表(配置场景对应的查询数据源)
+-- 场景查询路径表(可视化编排: 开始/执行/判断节点及连线分支)
 CREATE TABLE IF NOT EXISTS scene_paths (
     id TEXT PRIMARY KEY,
     scene_id TEXT NOT NULL,
     name TEXT,
-    data_source_ids TEXT,       -- JSON数组: 该场景查询时使用的数据源ID列表
+    nodes TEXT,                  -- 节点JSON: 开始/执行(绑定数据源)/判断(条件分支)节点
+    edges TEXT,                  -- 连线JSON: from/to/label(命中/未命中)
     status TEXT DEFAULT 'draft', -- draft/published
     created_at TEXT,
     updated_at TEXT,
@@ -262,41 +263,65 @@ def init_db():
     seed_data()
 
 
+def build_default_path(ds_items):
+    """Build default query path: start -> exec(ds1) -> judge(是否命中) --命中/未命中--> ...
+    ds_items: [(data_source_id, data_source_name), ...]
+    Returns (nodes, edges) lists."""
+    nodes = [{"id": "n_start", "type": "start", "name": "开始", "x": 40, "y": 160}]
+    edges = []
+    prev_id = "n_start"
+    for i, (ds_id, ds_name) in enumerate(ds_items):
+        eid, jid = f"n_exec{i+1}", f"n_judge{i+1}"
+        nodes.append({"id": eid, "type": "execute", "name": f"查询{ds_name}", "x": 260 + i*230, "y": 160, "data_source_id": ds_id, "query_target": f"{ds_name}IP主体信息"})
+        nodes.append({"id": jid, "type": "judge", "name": "是否命中", "x": 470 + i*230, "y": 160, "condition": "是否命中"})
+        edges.append({"from": prev_id, "to": eid})
+        edges.append({"from": eid, "to": jid})
+        prev_id = jid
+    end_x = 680 + 230*max(len(ds_items)-1, 0)
+    nodes.append({"id": "n_end", "type": "execute", "name": "返回结果", "x": end_x, "y": 160})
+    if ds_items:
+        edges.append({"from": prev_id, "to": "n_end", "label": "命中"})
+        edges.append({"from": prev_id, "to": "n_end", "label": "未命中"})
+    else:
+        edges.append({"from": prev_id, "to": "n_end"})
+    return nodes, edges
+
+
 def migrate_scene_paths(conn):
-    """Migrate scene_paths table from old nodes/edges schema to data_source_ids."""
+    """Migrate scene_paths table to the nodes/edges visual path schema."""
     cols = [r[1] for r in conn.execute("PRAGMA table_info(scene_paths)").fetchall()]
-    if "data_source_ids" in cols:
-        return
-    # Old schema without data_source_ids: recreate table
+    if "nodes" in cols:
+        return  # already target schema
+    # Old schema (data_source_ids only): rebuild as nodes/edges
     conn.execute("ALTER TABLE scene_paths RENAME TO scene_paths_old")
     conn.execute("""
         CREATE TABLE scene_paths (
             id TEXT PRIMARY KEY,
             scene_id TEXT NOT NULL,
             name TEXT,
-            data_source_ids TEXT,
+            nodes TEXT,
+            edges TEXT,
             status TEXT DEFAULT 'draft',
             created_at TEXT,
             updated_at TEXT,
             FOREIGN KEY (scene_id) REFERENCES scenes(id) ON DELETE CASCADE
         )
     """)
-    # Try to migrate old data: extract datasource names from nodes JSON and map to data source IDs
     old_rows = conn.execute("SELECT * FROM scene_paths_old").fetchall()
     for row in old_rows:
-        ds_ids = []
         try:
-            nodes = json.loads(row["nodes"] or "[]")
-            names = [n.get("datasource") or n.get("name") for n in nodes if n.get("datasource") or n.get("name")]
-            if names:
-                placeholders = ",".join(["?"] * len(names))
-                rows = conn.execute(f"SELECT id FROM data_sources WHERE name IN ({placeholders})", names).fetchall()
-                ds_ids = [r["id"] for r in rows]
+            ds_ids = json.loads(row["data_source_ids"] or "[]")
         except Exception:
-            pass
+            ds_ids = []
+        ds_items = []
+        for did in ds_ids:
+            r = conn.execute("SELECT id, name FROM data_sources WHERE id=?", (did,)).fetchone()
+            if r:
+                ds_items.append((r["id"], r["name"]))
+        nodes, edges = build_default_path(ds_items)
         conn.execute(
-            "INSERT INTO scene_paths (id, scene_id, name, data_source_ids, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
-            (row["id"], row["scene_id"], row["name"], json.dumps(ds_ids, ensure_ascii=False), row["status"], row["created_at"], row["updated_at"]),
+            "INSERT INTO scene_paths (id, scene_id, name, nodes, edges, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            (row["id"], row["scene_id"], row["name"], json.dumps(nodes, ensure_ascii=False), json.dumps(edges, ensure_ascii=False), row["status"], row["created_at"], row["updated_at"]),
         )
     conn.execute("DROP TABLE scene_paths_old")
 
@@ -339,7 +364,7 @@ def seed_data():
                 "INSERT INTO data_sources (id, name, source_type, authority_level, owner, contact, description, alarm_enabled, config_attrs, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (ds_id, *ds, "active", now_str(), now_str()),
             )
-            scene_ds_map.setdefault(ds[1], []).append(ds_id)
+            scene_ds_map.setdefault(ds[1], []).append((ds_id, ds[0]))
 
         # Subject templates
         tpl_fields = {
@@ -420,11 +445,12 @@ def seed_data():
                 "INSERT INTO scenes (id, name, scene_type, ip_range, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
                 (sid, *s, "enabled", now_str(), now_str()),
             )
-            # default path: configure which data sources to query for this scene
-            default_ds_ids = scene_ds_map.get(s[1], [])
+            # default path: visual query path (start -> exec(ds) -> judge -> end)
+            ds_items = scene_ds_map.get(s[1], [])
+            nodes, edges = build_default_path(ds_items)
             conn.execute(
-                "INSERT INTO scene_paths (id, scene_id, name, data_source_ids, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
-                (gen_id("sp_"), sid, f"{s[0]}查询数据源配置", json.dumps(default_ds_ids, ensure_ascii=False), "published", now_str(), now_str()),
+                "INSERT INTO scene_paths (id, scene_id, name, nodes, edges, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                (gen_id("sp_"), sid, f"{s[0]}查询路径", json.dumps(nodes, ensure_ascii=False), json.dumps(edges, ensure_ascii=False), "published", now_str(), now_str()),
             )
 
         # IP subject sample data

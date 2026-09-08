@@ -350,7 +350,7 @@
                     <el-card>
                         <template #header>
                             <div style="display:flex;justify-content:space-between;align-items:center">
-                                <span>场景路径管理（配置各场景查询主体信息所对应的数据源）</span>
+                                <span>场景路径管理（五类IP主体信息定位场景，可视化编排查询流程）</span>
                                 <el-button type="primary" @click="openSceneDialog()">新增场景</el-button>
                             </div>
                         </template>
@@ -361,7 +361,7 @@
                             <el-table-column label="状态" width="90"><template #default="{row}"><el-tag :type="row.status==='enabled'?'success':'info'">{{row.status==='enabled'?'开启':'关闭'}}</el-tag></template></el-table-column>
                             <el-table-column label="操作" width="280">
                                 <template #default="{row}">
-                                    <el-button size="small" text type="primary" @click="openPathBuilder(row)">数据源配置</el-button>
+                                    <el-button size="small" text type="primary" @click="openPathBuilder(row)">路径配置</el-button>
                                     <el-button size="small" text type="success" @click="toggleScene(row)">{{row.status==='enabled'?'关闭':'开启'}}</el-button>
                                     <el-button size="small" text type="warning" @click="openSceneDialog(row)">编辑</el-button>
                                     <el-button size="small" text type="danger" @click="deleteScene(row)">删除</el-button>
@@ -658,39 +658,97 @@
         <template #footer><el-button @click="showSceneDialog=false">取消</el-button><el-button type="primary" @click="saveScene">保存</el-button></template>
     </el-dialog>
 
-    <!-- Data Source Config Dialog (replacing path builder) -->
-    <el-dialog v-model="showPathBuilder" title="场景数据源配置 — 配置该场景查询主体信息所使用的数据源" width="780px" top="5vh">
-        <el-alert v-if="currentSceneInfo" :title="`场景: ${currentSceneInfo.name}（${currentSceneInfo.scene_type}）`" type="info" :closable="false" style="margin-bottom:15px"></el-alert>
-        <el-divider content-position="left">选择查询数据源（勾选后该场景的IP主体信息将从这些数据源查询）</el-divider>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:15px">
-            <el-card v-for="ds in allDataSources" :key="ds.id" shadow="hover"
-                     :style="{border: selectedDsIds.includes(ds.id)?'2px solid #409EFF':'1px solid #ebeef5',cursor:'pointer'}"
-                     @click="toggleDsSelect(ds.id)">
-                <div style="display:flex;justify-content:space-between;align-items:center">
-                    <div>
-                        <strong>{{ ds.name }}</strong>
-                        <el-tag size="small" style="margin-left:8px">{{ ds.source_type }}</el-tag>
-                    </div>
-                    <el-checkbox :model-value="selectedDsIds.includes(ds.id)" @change="toggleDsSelect(ds.id)">选用</el-checkbox>
-                </div>
-                <div style="margin-top:8px;font-size:13px;color:#909399">
-                    权威性: <el-tag size="small" :type="ds.authority_level==='高'?'danger':ds.authority_level==='中'?'warning':'info'">{{ ds.authority_level }}</el-tag>
-                    <span style="margin-left:10px">{{ ds.description }}</span>
-                </div>
-            </el-card>
+    <!-- Visual Path Builder Dialog (drag-drop) -->
+    <el-dialog v-model="showPathBuilder" title="场景查询路径配置（可视化拖拽构建）" width="1150px" top="3vh">
+        <el-alert v-if="currentSceneInfo" :title="`场景: ${currentSceneInfo.name}（${currentSceneInfo.scene_type}）— 拖拽组件到画布编排查询流程: 哪类数据去哪个数据源查、判断什么后走哪条分支`" type="info" :closable="false" style="margin-bottom:10px"></el-alert>
+        <div class="pb-toolbar">
+            <div class="pb-drag-item" draggable="true" @dragstart="dragStartNode($event,'start')"><el-icon><Flag/></el-icon>开始节点</div>
+            <div class="pb-drag-item" draggable="true" @dragstart="dragStartNode($event,'execute')"><el-icon><Cpu/></el-icon>执行节点</div>
+            <div class="pb-drag-item" draggable="true" @dragstart="dragStartNode($event,'judge')"><el-icon><Switch/></el-icon>判断节点</div>
+            <el-button size="small" @click="zoomCanvas(0.1)">放大</el-button>
+            <el-button size="small" @click="zoomCanvas(-0.1)">缩小</el-button>
+            <el-button size="small" @click="resetCanvasView">重置视图</el-button>
+            <el-button size="small" type="danger" @click="clearCanvas">清空画布</el-button>
+            <el-tag size="small" type="info">拖入组件 · 锚点拖拽连线 · 双击配置 · 右键删除</el-tag>
         </div>
-        <el-alert v-if="selectedDsIds.length===0" title="未选择任何数据源，该场景查询将无结果返回" type="warning" :closable="false" style="margin-bottom:15px"></el-alert>
-        <div v-if="currentPathInfo" style="margin-top:10px">
-            <el-tag>配置名称</el-tag>
-            <el-input v-model="currentPathInfo.name" placeholder="配置名称" style="width:240px;margin-left:10px"></el-input>
-            <el-tag style="margin-left:10px">已选数据源: {{selectedDsIds.length}}</el-tag>
-            <el-tag style="margin-left:10px" :type="currentPathInfo.status==='published'?'success':'info'">状态: {{currentPathInfo.status || 'draft'}}</el-tag>
+        <div class="path-canvas" ref="pathCanvas"
+             @drop.prevent="dropNode" @dragover.prevent
+             @mousedown="startCanvasPan" @mousemove="onCanvasMouseMove" @mouseup="onCanvasMouseUp" @mouseleave="onCanvasMouseUp"
+             @contextmenu.prevent>
+            <div class="pb-inner" :style="{transform:`translate(${panX}px,${panY}px) scale(${zoom})`, transformOrigin:'0 0'}">
+                <svg class="path-edges" :width="canvasW" :height="canvasH">
+                    <defs><marker id="pb-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#409EFF"/></marker></defs>
+                    <g v-for="(edge,idx) in pathEdges" :key="idx" class="pb-edge">
+                        <line :x1="nodeAnchorPos(edge.from).x" :y1="nodeAnchorPos(edge.from).y"
+                              :x2="nodePos(edge.to).x" :y2="nodePos(edge.to).y"
+                              stroke="#409EFF" stroke-width="2" marker-end="url(#pb-arrow)"
+                              @contextmenu.prevent.stop="deleteEdge(idx)"/>
+                        <text v-if="edge.label" :x="(nodeAnchorPos(edge.from).x+nodePos(edge.to).x)/2"
+                              :y="(nodeAnchorPos(edge.from).y+nodePos(edge.to).y)/2 - 6"
+                              fill="#E6A23C" font-size="12" font-weight="bold">{{edge.label}}</text>
+                    </g>
+                    <line v-if="linking" :x1="linkFromPos.x" :y1="linkFromPos.y" :x2="linkToPos.x" :y2="linkToPos.y" stroke="#909399" stroke-dasharray="5,4" stroke-width="2"/>
+                </svg>
+                <div v-for="node in pathNodes" :key="node.id"
+                     class="path-node" :class="'node-'+node.type"
+                     :style="{left: node.x+'px', top: node.y+'px'}"
+                     :title="node.type==='execute' ? (node.data_source_name?('数据源: '+node.data_source_name):'双击配置查询数据源') : (node.condition||'')"
+                     @mousedown.stop="startNodeDrag($event, node)"
+                     @mouseup.stop="endLink(node)"
+                     @dblclick.stop="openNodeConfig(node)"
+                     @contextmenu.prevent.stop="deleteNode(node)">
+                    <el-icon><component :is="node.type==='start'?'Flag':node.type==='judge'?'Switch':'Cpu'"/></el-icon>
+                    <span class="pb-node-name">{{ node.name }}</span>
+                    <div class="node-anchor" title="从此处拖拽连线到目标节点" @mousedown.stop.prevent="startLink($event, node)"></div>
+                    <div class="node-ds" v-if="node.data_source_name">{{node.data_source_name}}</div>
+                    <div class="node-cond" v-if="node.condition">{{node.condition}}</div>
+                </div>
+            </div>
+        </div>
+        <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <el-input v-model="currentPathInfo.name" placeholder="路径名称" style="width:240px"></el-input>
+            <el-tag>节点: {{pathNodes.length}}</el-tag>
+            <el-tag>连线: {{pathEdges.length}}</el-tag>
+            <el-tag :type="currentPathInfo.status==='published'?'success':'info'">状态: {{currentPathInfo.status||'draft'}}</el-tag>
         </div>
         <template #footer>
             <el-button @click="showPathBuilder=false">取消</el-button>
-            <el-button type="primary" @click="savePath">保存配置</el-button>
+            <el-button type="primary" @click="savePath">保存路径</el-button>
             <el-button type="success" @click="publishPath">保存并发布生效</el-button>
         </template>
+    </el-dialog>
+
+    <!-- Branch Label Picker -->
+    <el-dialog v-model="showBranchPicker" title="选择分支" width="340px">
+        <p style="text-align:center;margin:0 0 15px">判断节点「{{pendingLinkFrom ? pendingLinkFrom.name : ''}}」的连线分支:</p>
+        <div style="display:flex;justify-content:center;gap:15px">
+            <el-button type="success" @click="applyBranch('命中')">命中</el-button>
+            <el-button type="warning" @click="applyBranch('未命中')">未命中</el-button>
+        </div>
+    </el-dialog>
+
+    <!-- Node Config Dialog -->
+    <el-dialog v-model="showNodeConfig" :title="'节点配置 - ' + (nodeConfigForm.type==='start'?'开始节点':nodeConfigForm.type==='judge'?'判断节点':'执行节点')" width="500px">
+        <el-form :model="nodeConfigForm" label-width="100px">
+            <el-form-item label="节点名称"><el-input v-model="nodeConfigForm.name"></el-input></el-form-item>
+            <template v-if="nodeConfigForm.type==='execute'">
+                <el-form-item label="查询数据源">
+                    <el-select v-model="nodeConfigForm.data_source_id" placeholder="选择该节点查询的数据源(留空则为结束/返回节点)" clearable style="width:100%">
+                        <el-option v-for="ds in allDataSources" :key="ds.id" :label="ds.name + ' (' + ds.source_type + ')'" :value="ds.id"/>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="查询目标"><el-input v-model="nodeConfigForm.query_target" placeholder="如: 移网IP主体信息(留空默认)"></el-input></el-form-item>
+            </template>
+            <template v-if="nodeConfigForm.type==='judge'">
+                <el-form-item label="判断条件">
+                    <el-select v-model="nodeConfigForm.condition" style="width:100%">
+                        <el-option label="是否命中(按连线标签: 命中/未命中 分支路由)" value="是否命中"/>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="分支说明"><span style="color:#909399;font-size:13px">命中分支: 之前查询已命中时走; 未命中分支: 未命中时走(可连到下一个执行节点继续查询)</span></el-form-item>
+            </template>
+        </el-form>
+        <template #footer><el-button @click="showNodeConfig=false">取消</el-button><el-button type="primary" @click="applyNodeConfig">确定</el-button></template>
     </el-dialog>
 
     <!-- Conflict Detail Dialog -->
