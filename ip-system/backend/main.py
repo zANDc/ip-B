@@ -252,6 +252,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
+@app.get("/healthz")
+def healthz():
+    """Health check endpoint for preview gateway / load balancer."""
+    return {"status": "ok"}
+
+
 @app.post("/api/login")
 def login(req: LoginRequest, request: Request):
     with get_conn() as conn:
