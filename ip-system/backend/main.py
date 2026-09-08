@@ -177,6 +177,62 @@ def execute_scene_path(conn, nodes, edges, ip, req):
     return results, records
 
 
+def query_ip_results(conn, ip, start_time, end_time, scene_type=None):
+    """Unified real-data query used by all query endpoints.
+
+    Flow: scene detection -> published path execution -> fallback scene-wide query.
+    All results come from the ip_subjects table (real database rows), no mocked data.
+    Returns (results, records, scene_type, path_name)."""
+    from types import SimpleNamespace
+    if not scene_type:
+        scene_type = detect_scene_by_ip(conn, ip)
+
+    results, records = [], []
+    path_name = None
+    if scene_type:
+        scene = conn.execute("SELECT * FROM scenes WHERE scene_type=? AND status='enabled'", (scene_type,)).fetchone()
+        if scene:
+            path = conn.execute(
+                "SELECT * FROM scene_paths WHERE scene_id=? AND status='published' ORDER BY updated_at DESC LIMIT 1",
+                (scene["id"],),
+            ).fetchone()
+            if path:
+                try:
+                    nodes = json.loads(path["nodes"] or "[]")
+                except Exception:
+                    nodes = []
+                try:
+                    edges = json.loads(path["edges"] or "[]")
+                except Exception:
+                    edges = []
+                if nodes:
+                    path_name = path["name"]
+                    req = SimpleNamespace(start_time=start_time, end_time=end_time)
+                    results, records = execute_scene_path(conn, nodes, edges, ip, req)
+                    records.insert(0, ("场景识别", "judge", "success", f"场景类型: {scene_type} (路径: {path_name})", "系统"))
+
+    # Fallback: no published path -> query all data sources of this scene (with time filter)
+    if not records:
+        sql = "SELECT * FROM ip_subjects WHERE ip_address=?"
+        params = [ip]
+        if start_time and end_time:
+            sql += " AND start_time <= ? AND end_time >= ?"
+            params += [end_time, start_time]
+        if scene_type:
+            sql += " AND scene_type=?"
+            params += [scene_type]
+        results = conn.execute(sql, params).fetchall()
+        ds_desc = ",".join(sorted({r["data_source"] for r in results})) if results else "无匹配数据源"
+        records = [
+            ("开始", "start", "success", "任务开始", "系统"),
+            ("场景识别", "judge", "success", f"场景类型: {scene_type or '未识别'} (未配置发布路径, 查询场景全部数据源)", "系统"),
+            ("数据源查询", "execute", "success" if results else "failed", f"查询数据源: {ds_desc}", ds_desc),
+            ("数据融合", "execute", "success" if results else "failed", f"命中{len(results)}条记录", "融合算法"),
+            ("返回结果", "execute", "success", f"返回{len(results)}条定位结果", "系统"),
+        ]
+    return results, records, scene_type, path_name
+
+
 # ============ Auth (simplified) ============
 class LoginRequest(BaseModel):
     username: str
@@ -221,56 +277,8 @@ def create_query_task(req: QueryTaskRequest, request: Request):
     with get_conn() as conn:
         task_id = gen_id("task_")
 
-        # Determine scene type: use request param, or auto-detect by IP range
-        scene_type = req.scene_type
-        if not scene_type:
-            scene_type = detect_scene_by_ip(conn, ip)
-
-        # Resolve the published visual query path for this scene and execute it
-        results = []
-        records = []
-        path_name = None
-        if scene_type:
-            scene = conn.execute("SELECT * FROM scenes WHERE scene_type=? AND status='enabled'", (scene_type,)).fetchone()
-            if scene:
-                path = conn.execute(
-                    "SELECT * FROM scene_paths WHERE scene_id=? AND status='published' ORDER BY updated_at DESC LIMIT 1",
-                    (scene["id"],),
-                ).fetchone()
-                if path:
-                    try:
-                        nodes = json.loads(path["nodes"] or "[]")
-                    except Exception:
-                        nodes = []
-                    try:
-                        edges = json.loads(path["edges"] or "[]")
-                    except Exception:
-                        edges = []
-                    if nodes:
-                        path_name = path["name"]
-                        results, records = execute_scene_path(conn, nodes, edges, ip, req)
-                        # Prepend scene identification record
-                        records.insert(0, ("场景识别", "judge", "success", f"场景类型: {scene_type} (路径: {path_name})", "系统"))
-
-        # Fallback: no published path -> query all data sources of this scene
-        if not records:
-            sql = "SELECT * FROM ip_subjects WHERE ip_address=?"
-            params = [ip]
-            if req.start_time and req.end_time:
-                sql += " AND start_time <= ? AND end_time >= ?"
-                params += [req.end_time, req.start_time]
-            if scene_type:
-                sql += " AND scene_type=?"
-                params += [scene_type]
-            results = conn.execute(sql, params).fetchall()
-            ds_desc = ",".join(sorted({r["data_source"] for r in results})) if results else "无匹配数据源"
-            records = [
-                ("开始", "start", "success", "任务开始", "系统"),
-                ("场景识别", "judge", "success", f"场景类型: {scene_type or '未识别'} (未配置发布路径, 查询场景全部数据源)", "系统"),
-                ("数据源查询", "execute", "success" if results else "failed", f"查询数据源: {ds_desc}", ds_desc),
-                ("数据融合", "execute", "success" if results else "failed", f"命中{len(results)}条记录", "融合算法"),
-                ("返回结果", "execute", "success", f"返回{len(results)}条定位结果", "系统"),
-            ]
+        # Unified real-data query: scene detection -> published path execution -> fallback
+        results, records, scene_type, path_name = query_ip_results(conn, ip, req.start_time, req.end_time, req.scene_type)
 
         # Create task
         task_name = req.task_name or f"查询-{ip}"
@@ -310,8 +318,11 @@ def get_task_detail(task_id: str, request: Request):
         task = conn.execute("SELECT * FROM query_tasks WHERE id=?", (task_id,)).fetchone()
         if not task:
             raise HTTPException(404, "任务不存在")
-        # Re-query results
-        results = conn.execute("SELECT * FROM ip_subjects WHERE ip_address=?", (task["ip_address"],)).fetchall()
+        # Re-query with the same unified real-data logic as task creation
+        # (same time range + scene path, so the detail view matches the task query)
+        results, records, _, _ = query_ip_results(
+            conn, task["ip_address"], task["start_time"], task["end_time"], task["scene_type"]
+        )
         paths = conn.execute("SELECT * FROM task_paths WHERE task_id=? ORDER BY rowid", (task_id,)).fetchall()
         return {
             "task": dict(task),
@@ -387,7 +398,10 @@ def get_location_detail(task_id: str, request: Request):
         task = conn.execute("SELECT * FROM query_tasks WHERE id=?", (task_id,)).fetchone()
         if not task:
             raise HTTPException(404, "任务不存在")
-        results = conn.execute("SELECT * FROM ip_subjects WHERE ip_address=?", (task["ip_address"],)).fetchall()
+        # Re-query with the same unified real-data logic as task creation
+        results, records, _, _ = query_ip_results(
+            conn, task["ip_address"], task["start_time"], task["end_time"], task["scene_type"]
+        )
         # Build detail with trace fields
         details = []
         for r in results:
@@ -487,15 +501,20 @@ async def batch_import(request: Request, file: UploadFile = File(...)):
             end_time = str(ws.cell(row=row_idx, column=6).value or "")
             scene_type = str(ws.cell(row=row_idx, column=7).value or "")
 
-            # Create task for each IP
+            # Create task for each IP using the same unified real-data query
             task_id = gen_id("task_")
             task_name = f"批量查询-{ip}"
-            ip_results = conn.execute("SELECT * FROM ip_subjects WHERE ip_address=?", (ip,)).fetchall()
+            ip_results, ip_records, eff_scene, _ = query_ip_results(conn, ip, start_time, end_time, scene_type)
             conn.execute(
                 """INSERT INTO query_tasks (id, task_name, ip_address, ip_version, port, start_time, end_time, scene_type, status, result_count, created_by, created_at, completed_at, batch_id)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (task_id, task_name, ip, ip_ver, port, start_time, end_time, scene_type, "completed", len(ip_results), "admin", now_str(), now_str(), batch_id),
+                (task_id, task_name, ip, ip_ver, port, start_time, end_time, eff_scene or "", "completed", len(ip_results), "admin", now_str(), now_str(), batch_id),
             )
+            for rec in ip_records:
+                conn.execute(
+                    "INSERT INTO task_paths (id, task_id, node_name, node_type, status, detail, data_source, started_at, completed_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (gen_id("tp_"), task_id, rec[0], rec[1], rec[2], rec[3], rec[4], now_str(), now_str()),
+                )
             results.append({"ip": ip, "task_id": task_id, "count": len(ip_results)})
 
         log_operation(conn, "批量导入", "admin", str(request.url), f"批量导入{len(results)}个IP地址", get_client_ip(request))
