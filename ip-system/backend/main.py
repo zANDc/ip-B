@@ -1277,7 +1277,7 @@ def create_user(req: UserCreateRequest, request: Request):
             raise HTTPException(400, "用户名已存在")
         uid = gen_id("u_")
         conn.execute(
-            "INSERT INTO users (id, username, password, real_name, role, phone, email, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO users (id, username, password, real_name, role, phone, email, status, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
             (uid, req.username, hash_password(req.password), req.real_name, req.role, req.phone, req.email, "active", now_str()),
         )
         log_operation(conn, "用户管理", "admin", str(request.url), f"新建用户:{req.username}", get_client_ip(request))
@@ -1315,10 +1315,8 @@ def update_user(user_id: str, req: UserUpdateRequest, request: Request):
             fields.append("password=?"); params.append(hash_password(req.password))
         if not fields:
             return {"message": "无更新内容"}
-        fields.append("last_login=last_login")
-        params.append(now_str())
         params.append(user_id)
-        conn.execute(f"UPDATE users SET {','.join(fields)}, last_login=? WHERE id=?", params)
+        conn.execute(f"UPDATE users SET {','.join(fields)} WHERE id=?", params)
         log_operation(conn, "用户管理", "admin", str(request.url), f"编辑用户:{u['username']}", get_client_ip(request))
         return {"message": "用户更新成功"}
 
