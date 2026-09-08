@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IP地址查询校准系统</title>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://unpkg.com/element-plus"></script>
+    <script src="https://unpkg.com/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+</head>
+<body>
+<div id="app">
+    <!-- Login Page -->
+    <div v-if="!token" class="login-container">
+        <el-card class="login-card">
+            <template #header>
+                <div class="login-header">
+                    <h2>IP地址查询校准系统</h2>
+                    <p>安徽移动 · IP主体信息定位平台</p>
+                </div>
+            </template>
+            <el-form :model="loginForm" label-width="70px" @submit.prevent="handleLogin">
+                <el-form-item label="用户名">
+                    <el-input v-model="loginForm.username" placeholder="admin"></el-input>
+                </el-form-item>
+                <el-form-item label="密码">
+                    <el-input v-model="loginForm.password" type="password" placeholder="admin123" show-password></el-input>
+                </el-form-item>
+                <el-form-item>
+                    <el-button type="primary" @click="handleLogin" style="width:100%">登 录</el-button>
+                </el-form-item>
+            </el-form>
+            <el-alert title="默认账号: admin / admin123" type="info" :closable="false"></el-alert>
+        </el-card>
+    </div>
+
+    <!-- Main Layout -->
+    <el-container v-else style="height:100vh">
+        <el-aside width="220px" class="sidebar">
+            <div class="logo">
+                <el-icon size="24"><Position/></el-icon>
+                <span>IP查询校准</span>
+            </div>
+            <el-menu :default-active="activeMenu" @select="handleMenuSelect" background-color="#001529" text-color="#fff" active-text-color="#409EFF">
+                <el-menu-item index="dashboard"><el-icon><Odometer/></el-icon><span>系统首页</span></el-menu-item>
+                <el-sub-menu index="query">
+                    <template #title><el-icon><Search/></el-icon><span>IP主体定位查询</span></template>
+                    <el-menu-item index="query-create">IP主体信息查询</el-menu-item>
+                    <el-menu-item index="query-list">任务列表查询</el-menu-item>
+                    <el-menu-item index="query-batch">批量导入查询</el-menu-item>
+                </el-sub-menu>
+                <el-sub-menu index="data">
+                    <template #title><el-icon><Coin/></el-icon><span>数据与路径管理</span></template>
+                    <el-menu-item index="datasource">数据源管理</el-menu-item>
+                    <el-menu-item index="template">主体信息管理</el-menu-item>
+                    <el-menu-item index="scene">场景路径管理</el-menu-item>
+                </el-sub-menu>
+                <el-sub-menu index="validate">
+                    <template #title><el-icon><Checked/></el-icon><span>数据校验</span></template>
+                    <el-menu-item index="conflict">冲突工单检测</el-menu-item>
+                    <el-menu-item index="assessment">置信度评估</el-menu-item>
+                </el-sub-menu>
+                <el-sub-menu index="system">
+                    <template #title><el-icon><Setting/></el-icon><span>系统管理</span></template>
+                    <el-menu-item index="log">日志管理</el-menu-item>
+                    <el-menu-item index="security">安全配置</el-menu-item>
+                </el-sub-menu>
+            </el-menu>
+        </el-aside>
+
+        <el-container>
+            <el-header class="header">
+                <span class="header-title">{{ pageTitle }}</span>
+                <div class="header-right">
+                    <el-tag type="success">{{ currentUser.real_name || 'admin' }}</el-tag>
+                    <el-button text @click="logout">退出</el-button>
+                </div>
+            </el-header>
+            <el-main class="main-content">
+                <!-- Dashboard -->
+                <div v-show="activeMenu==='dashboard'">
+                    <el-row :gutter="20">
+                        <el-col :span="6" v-for="card in dashboardCards" :key="card.title">
+                            <el-card shadow="hover">
+                                <div class="stat-card">
+                                    <el-icon :size="40" :color="card.color"><component :is="card.icon"/></el-icon>
+                                    <div>
+                                        <div class="stat-num">{{ card.value }}</div>
+                                        <div class="stat-label">{{ card.title }}</div>
+                                    </div>
+                                </div>
+                            </el-card>
+                        </el-col>
+                    </el-row>
+                    <el-card style="margin-top:20px">
+                        <template #header><span>系统简介</span></template>
+                        <p>本系统为安徽移动IP地址查询校准系统，实现IP主体信息查询、主体信息冲突规避校准、主体置信度评估等平台能力。</p>
+                        <p>依托安徽移动公司基础数据资源优势，实现基础数据资源从采集、存储到查询的有效融合与应用，解决现有数据分散、信息量有限、时效性不佳、关联困难等问题。</p>
+                        <el-divider/>
+                        <h4>核心能力</h4>
+                        <el-row :gutter="10">
+                            <el-col :span="6"><el-tag type="primary">IP主体定位查询</el-tag></el-col>
+                            <el-col :span="6"><el-tag type="success">数据与路径管理</el-tag></el-col>
+                            <el-col :span="6"><el-tag type="warning">冲突工单检测</el-tag></el-col>
+                            <el-col :span="6"><el-tag type="danger">置信度评估</el-tag></el-col>
+                        </el-row>
+                    </el-card>
+                </div>
+
+                <!-- IP Query Create -->
+                <div v-show="activeMenu==='query-create'">
+                    <el-card>
+                        <template #header><span>IP主体信息查询</span></template>
+                        <el-form :model="queryForm" label-width="100px" :rules="queryRules" ref="queryFormRef">
+                            <el-row :gutter="20">
+                                <el-col :span="8">
+                                    <el-form-item label="IP地址" prop="ip_address">
+                                        <el-input v-model="queryForm.ip_address" placeholder="输入IPv4或IPv6地址"></el-input>
+                                    </el-form-item>
+                                </el-col>
+                                <el-col :span="6">
+                                    <el-form-item label="IP版本">
+                                        <el-select v-model="queryForm.ip_version" placeholder="自动识别" clearable>
+                                            <el-option label="IPv4" value="IPv4"></el-option>
+                                            <el-option label="IPv6" value="IPv6"></el-option>
+                                        </el-select>
+                                    </el-form-item>
+                                </el-col>
+                                <el-col :span="6">
+                                    <el-form-item label="端口">
+                                        <el-input v-model="queryForm.port" placeholder="端口号(可选)"></el-input>
+                                    </el-form-item>
+                                </el-col>
+                                <el-col :span="4">
+                                    <el-form-item label="场景">
+                                        <el-select v-model="queryForm.scene_type" placeholder="全部" clearable>
+                                            <el-option label="移网" value="移网"></el-option>
+                                            <el-option label="家宽" value="家宽"></el-option>
+                                            <el-option label="专线" value="专线"></el-option>
+                                            <el-option label="IDC" value="IDC"></el-option>
+                                            <el-option label="自有业务" value="自有业务"></el-option>
+                                        </el-select>
+                                    </el-form-item>
+                                </el-col>
+                            </el-row>
+                            <el-row :gutter="20">
+                                <el-col :span="8">
+                                    <el-form-item label="开始时间" prop="start_time">
+                                        <el-date-picker v-model="queryForm.start_time" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" placeholder="选择开始时间" style="width:100%"></el-date-picker>
+                                    </el-form-item>
+                                </el-col>
+                                <el-col :span="8">
+                                    <el-form-item label="结束时间" prop="end_time">
+                                        <el-date-picker v-model="queryForm.end_time" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" placeholder="选择结束时间" style="width:100%"></el-date-picker>
+                                    </el-form-item>
+                                </el-col>
+                                <el-col :span="4">
+                                    <el-form-item>
+                                        <el-button type="primary" @click="handleQuery" :loading="queryLoading">下发查询任务</el-button>
+                                    </el-form-item>
+                                </el-col>
+                            </el-row>
+                        </el-form>
+                        <el-alert title="测试数据示例: IPv4: 10.0.1.100, 192.168.1.100, 172.16.1.100 | IPv6: 2408:8000:1::100" type="info" :closable="false" style="margin-bottom:15px"></el-alert>
+                    </el-card>
+
+                    <!-- Query Results -->
+                    <el-card v-if="queryResult" style="margin-top:20px">
+                        <template #header>
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <span>查询结果 (共{{ queryResult.count }}条)</span>
+                                <div>
+                                    <el-button size="small" @click="viewPathReplay">路径回溯</el-button>
+                                    <el-button size="small" type="success" @click="showSensitiveDialog = true">查看敏感信息</el-button>
+                                </div>
+                            </div>
+                        </template>
+                        <el-table :data="queryResult.results" border stripe>
+                            <el-table-column prop="ip_address" label="IP地址" width="140"></el-table-column>
+                            <el-table-column prop="scene_type" label="场景" width="80"></el-table-column>
+                            <el-table-column prop="ip_type" label="类型" width="80"></el-table-column>
+                            <el-table-column prop="user_name" label="用户名(脱敏)" width="100"></el-table-column>
+                            <el-table-column prop="phone" label="手机号(脱敏)" width="120"></el-table-column>
+                            <el-table-column prop="unit_name" label="单位名称" width="120"></el-table-column>
+                            <el-table-column prop="address" label="地址(脱敏)" width="150"></el-table-column>
+                            <el-table-column prop="data_source" label="数据源" width="120"></el-table-column>
+                            <el-table-column prop="location" label="归属地" width="100"></el-table-column>
+                            <el-table-column label="操作" width="120">
+                                <template #default="scope">
+                                    <el-button size="small" text type="primary" @click="showLocationDetail(scope.row)">定位详情</el-button>
+                                    <el-button size="small" text type="warning" @click="showManualFix(scope.row)">人工修正</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+
+                        <!-- Path Replay -->
+                        <div v-if="showPathReplay" style="margin-top:20px">
+                            <el-divider>查询路径回溯</el-divider>
+                            <el-timeline>
+                                <el-timeline-item v-for="(p,idx) in queryResult.paths" :key="idx"
+                                    :type="p.status==='success'?'success':'danger'"
+                                    :timestamp="p.started_at" placement="top">
+                                    <el-card>
+                                        <h4>{{ p.node_name }} <el-tag size="small" :type="p.node_type==='start'?'info':p.node_type==='judge'?'warning':'success'">{{p.node_type}}</el-tag></h4>
+                                        <p>{{ p.detail }}</p>
+                                        <p v-if="p.data_source">数据源: {{ p.data_source }}</p>
+                                    </el-card>
+                                </el-timeline-item>
+                            </el-timeline>
+                        </div>
+                    </el-card>
+                </div>
+
+                <!-- Task List -->
+                <div v-show="activeMenu==='query-list'">
+                    <el-card>
+                        <template #header><span>任务列表多维度查询</span></template>
+                        <el-form :inline="true" :model="taskQuery">
+                            <el-form-item label="IP地址"><el-input v-model="taskQuery.ip_address" clearable></el-input></el-form-item>
+                            <el-form-item label="版本"><el-select v-model="taskQuery.ip_version" clearable style="width:100px"><el-option label="IPv4" value="IPv4"/><el-option label="IPv6" value="IPv6"/></el-select></el-form-item>
+                            <el-form-item label="场景"><el-select v-model="taskQuery.scene_type" clearable style="width:100px"><el-option label="移网" value="移网"/><el-option label="家宽" value="家宽"/><el-option label="专线" value="专线"/><el-option label="IDC" value="IDC"/><el-option label="自有业务" value="自有业务"/></el-select></el-form-item>
+                            <el-form-item label="任务名"><el-input v-model="taskQuery.task_name" clearable></el-input></el-form-item>
+                            <el-form-item>
+                                <el-button type="primary" @click="loadTasks(1)">查询</el-button>
+                                <el-button @click="resetTaskQuery">重置</el-button>
+                            </el-form-item>
+                        </el-form>
+                        <el-table :data="taskList" border stripe>
+                            <el-table-column prop="task_name" label="任务名称"></el-table-column>
+                            <el-table-column prop="ip_address" label="IP地址" width="140"></el-table-column>
+                            <el-table-column prop="ip_version" label="版本" width="70"></el-table-column>
+                            <el-table-column prop="scene_type" label="场景" width="80"></el-table-column>
+                            <el-table-column prop="result_count" label="结果数" width="70"></el-table-column>
+                            <el-table-column prop="status" label="状态" width="90"><template #default="{row}"><el-tag :type="row.status==='completed'?'success':'warning'">{{row.status}}</el-tag></template></el-table-column>
+                            <el-table-column prop="created_at" label="创建时间" width="160"></el-table-column>
+                            <el-table-column label="操作" width="260">
+                                <template #default="{row}">
+                                    <el-button size="small" text type="primary" @click="viewTaskResult(row)">查看结果</el-button>
+                                    <el-button size="small" text type="success" @click="viewTaskPath(row)">路径回放</el-button>
+                                    <el-button size="small" text type="warning" @click="viewTaskDetail(row)">定位详情</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                        <el-pagination style="margin-top:15px;text-align:right" v-model:current-page="taskPage" :page-size="10" :total="taskTotal" layout="total, prev, pager, next" @current-change="loadTasks"></el-pagination>
+                    </el-card>
+                </div>
+
+                <!-- Batch Import -->
+                <div v-show="activeMenu==='query-batch'">
+                    <el-card>
+                        <template #header><span>批量导入IP查询</span></template>
+                        <el-alert title="支持xlsx格式批量IP地址信息上传查询，文件大小限制5MB" type="info" :closable="false" style="margin-bottom:15px"></el-alert>
+                        <el-upload drag accept=".xlsx" :auto-upload="true" :http-request="handleBatchUpload" :before-upload="beforeBatchUpload">
+                            <el-icon class="el-icon--upload"><upload-filled></upload-filled></el-icon>
+                            <div class="el-upload__text">将xlsx文件拖到此处，或<em>点击上传</em></div>
+                            <template #tip>
+                                <div class="el-upload__tip">仅支持xlsx格式，文件大小不超过5MB</div>
+                            </template>
+                        </el-upload>
+                        <div style="margin-top:15px">
+                            <el-button type="primary" @click="downloadTemplate">下载批量导入模板</el-button>
+                        </div>
+                        <el-card v-if="batchResult" style="margin-top:20px">
+                            <template #header><span>导入结果</span></template>
+                            <p>批量ID: {{ batchResult.batch_id }} | 共导入: {{ batchResult.total }} 个IP</p>
+                            <el-table :data="batchResult.results" border>
+                                <el-table-column prop="ip" label="IP地址"></el-table-column>
+                                <el-table-column prop="count" label="结果数" width="100"></el-table-column>
+                                <el-table-column label="操作" width="100">
+                                    <template #default="{row}">
+                                        <el-button size="small" text type="primary" @click="viewBatchTask(row)">查看</el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+                        </el-card>
+                    </el-card>
+                </div>
+
+                <!-- Data Source Management -->
+                <div v-show="activeMenu==='datasource'">
+                    <el-card>
+                        <template #header>
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <span>数据源管理</span>
+                                <el-button type="primary" @click="openDataSourceDialog()">新增数据源</el-button>
+                            </div>
+                        </template>
+                        <el-form :inline="true" :model="dsQuery">
+                            <el-form-item label="名称"><el-input v-model="dsQuery.name" clearable></el-input></el-form-item>
+                            <el-form-item label="类型"><el-select v-model="dsQuery.source_type" clearable><el-option label="移网" value="移网"/><el-option label="家宽" value="家宽"/><el-option label="专线" value="专线"/><el-option label="IDC" value="IDC"/><el-option label="自有业务" value="自有业务"/></el-select></el-form-item>
+                            <el-form-item label="权威性"><el-select v-model="dsQuery.authority_level" clearable><el-option label="高" value="高"/><el-option label="中" value="中"/><el-option label="低" value="低"/></el-select></el-form-item>
+                            <el-form-item><el-button type="primary" @click="loadDataSources(1)">查询</el-button><el-button @click="resetDsQuery">重置</el-button></el-form-item>
+                        </el-form>
+                        <el-table :data="dsList" border stripe>
+                            <el-table-column prop="name" label="数据源名称"></el-table-column>
+                            <el-table-column prop="source_type" label="类型" width="80"></el-table-column>
+                            <el-table-column prop="authority_level" label="权威性" width="80"><template #default="{row}"><el-tag :type="row.authority_level==='高'?'danger':row.authority_level==='中'?'warning':'info'">{{row.authority_level}}</el-tag></template></el-table-column>
+                            <el-table-column prop="owner" label="负责人" width="80"></el-table-column>
+                            <el-table-column prop="contact" label="联系方式" width="120"></el-table-column>
+                            <el-table-column label="告警监控" width="90"><template #default="{row}"><el-tag :type="row.alarm_enabled?'success':'info'">{{row.alarm_enabled?'开启':'关闭'}}</el-tag></template></el-table-column>
+                            <el-table-column prop="status" label="状态" width="70"></el-table-column>
+                            <el-table-column label="操作" width="180">
+                                <template #default="{row}">
+                                    <el-button size="small" text type="primary" @click="viewDataSource(row)">详情</el-button>
+                                    <el-button size="small" text type="warning" @click="openDataSourceDialog(row)">编辑</el-button>
+                                    <el-button size="small" text type="danger" @click="deleteDataSource(row)">删除</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                        <el-pagination style="margin-top:15px;text-align:right" v-model:current-page="dsPage" :page-size="10" :total="dsTotal" layout="total, prev, pager, next" @current-change="loadDataSources"></el-pagination>
+                    </el-card>
+                </div>
+
+                <!-- Subject Template Management -->
+                <div v-show="activeMenu==='template'">
+                    <el-card>
+                        <template #header>
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <span>主体信息管理</span>
+                                <el-button type="primary" @click="openTemplateDialog()">新建模板</el-button>
+                            </div>
+                        </template>
+                        <el-table :data="templateList" border stripe>
+                            <el-table-column prop="name" label="模板名称"></el-table-column>
+                            <el-table-column prop="scene_type" label="场景类型" width="100"></el-table-column>
+                            <el-table-column prop="description" label="描述"></el-table-column>
+                            <el-table-column label="字段数" width="80"><template #default="{row}">{{row.fields?row.fields.length:0}}</template></el-table-column>
+                            <el-table-column prop="created_at" label="创建时间" width="160"></el-table-column>
+                            <el-table-column label="操作" width="200">
+                                <template #default="{row}">
+                                    <el-button size="small" text type="primary" @click="viewTemplate(row)">详情</el-button>
+                                    <el-button size="small" text type="success" @click="openFieldDialog(row)">字段管理</el-button>
+                                    <el-button size="small" text type="warning" @click="openTemplateDialog(row)">编辑</el-button>
+                                    <el-button size="small" text type="danger" @click="deleteTemplate(row)">删除</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                        <el-pagination style="margin-top:15px;text-align:right" v-model:current-page="tplPage" :page-size="10" :total="tplTotal" layout="total, prev, pager, next" @current-change="loadTemplates"></el-pagination>
+                    </el-card>
+                </div>
+
+                <!-- Scene Path Management -->
+                <div v-show="activeMenu==='scene'">
+                    <el-card>
+                        <template #header>
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <span>场景路径管理（五类IP主体信息定位场景）</span>
+                                <el-button type="primary" @click="openSceneDialog()">新增场景</el-button>
+                            </div>
+                        </template>
+                        <el-table :data="sceneList" border stripe>
+                            <el-table-column prop="name" label="场景名称"></el-table-column>
+                            <el-table-column prop="scene_type" label="场景类型" width="100"><template #default="{row}"><el-tag>{{row.scene_type}}</el-tag></template></el-table-column>
+                            <el-table-column prop="ip_range" label="IP地址范围" width="200"></el-table-column>
+                            <el-table-column label="状态" width="90"><template #default="{row}"><el-tag :type="row.status==='enabled'?'success':'info'">{{row.status==='enabled'?'开启':'关闭'}}</el-tag></template></el-table-column>
+                            <el-table-column label="操作" width="280">
+                                <template #default="{row}">
+                                    <el-button size="small" text type="primary" @click="openPathBuilder(row)">路径配置</el-button>
+                                    <el-button size="small" text type="success" @click="toggleScene(row)">{{row.status==='enabled'?'关闭':'开启'}}</el-button>
+                                    <el-button size="small" text type="warning" @click="openSceneDialog(row)">编辑</el-button>
+                                    <el-button size="small" text type="danger" @click="deleteScene(row)">删除</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                        <el-pagination style="margin-top:15px;text-align:right" v-model:current-page="scenePage" :page-size="10" :total="sceneTotal" layout="total, prev, pager, next" @current-change="loadScenes"></el-pagination>
+                    </el-card>
+                </div>
+
+                <!-- Conflict Tickets -->
+                <div v-show="activeMenu==='conflict'">
+                    <el-card>
+                        <template #header><span>冲突工单检测</span></template>
+                        <el-form :inline="true" :model="conflictQuery">
+                            <el-form-item label="工单号"><el-input v-model="conflictQuery.ticket_no" clearable></el-input></el-form-item>
+                            <el-form-item label="IP地址"><el-input v-model="conflictQuery.ip_address" clearable></el-input></el-form-item>
+                            <el-form-item label="来源"><el-select v-model="conflictQuery.conflict_source" clearable><el-option label="数据冲突" value="数据冲突"/><el-option label="系统检测" value="系统检测"/><el-option label="用户修正" value="用户修正"/></el-select></el-form-item>
+                            <el-form-item label="状态"><el-select v-model="conflictQuery.status" clearable><el-option label="待处理" value="open"/><el-option label="处理中" value="processing"/><el-option label="已解决" value="resolved"/></el-select></el-form-item>
+                            <el-form-item><el-button type="primary" @click="loadConflicts(1)">查询</el-button><el-button @click="resetConflictQuery">重置</el-button></el-form-item>
+                        </el-form>
+                        <el-table :data="conflictList" border stripe>
+                            <el-table-column prop="ticket_no" label="工单号" width="180"></el-table-column>
+                            <el-table-column prop="ip_address" label="IP地址" width="130"></el-table-column>
+                            <el-table-column prop="conflict_source" label="冲突来源" width="90"><template #default="{row}"><el-tag :type="row.conflict_source==='用户修正'?'warning':row.conflict_source==='系统检测'?'danger':'primary'">{{row.conflict_source}}</el-tag></template></el-table-column>
+                            <el-table-column prop="conflict_type" label="冲突类型" width="90"></el-table-column>
+                            <el-table-column prop="field_name" label="冲突字段" width="80"></el-table-column>
+                            <el-table-column prop="conflict_desc" label="冲突描述"></el-table-column>
+                            <el-table-column label="状态" width="90"><template #default="{row}"><el-tag :type="row.status==='open'?'danger':row.status==='processing'?'warning':'success'">{{row.status==='open'?'待处理':row.status==='processing'?'处理中':'已解决'}}</el-tag></template></el-table-column>
+                            <el-table-column label="操作" width="220">
+                                <template #default="{row}">
+                                    <el-button size="small" text type="info" @click="viewConflictDetail(row)">详情</el-button>
+                                    <el-button size="small" text type="primary" @click="processConflict(row,'fix')">手动修正</el-button>
+                                    <el-button size="small" text type="success" @click="processConflict(row,'verify')">治理校验</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                        <el-pagination style="margin-top:15px;text-align:right" v-model:current-page="conflictPage" :page-size="10" :total="conflictTotal" layout="total, prev, pager, next" @current-change="loadConflicts"></el-pagination>
+                    </el-card>
+                </div>
+
+                <!-- Confidence Assessment -->
+                <div v-show="activeMenu==='assessment'">
+                    <el-tabs v-model="assessmentTab">
+                        <el-tab-pane label="评估规则配置" name="rules">
+                            <el-card>
+                                <template #header>
+                                    <div style="display:flex;justify-content:space-between;align-items:center">
+                                        <span>置信度评估维度配置</span>
+                                        <el-button type="primary" @click="openDimensionDialog()">新增维度</el-button>
+                                    </div>
+                                </template>
+                                <el-table :data="dimensionList" border stripe>
+                                    <el-table-column prop="name" label="维度名称" width="120"></el-table-column>
+                                    <el-table-column prop="description" label="维度说明"></el-table-column>
+                                    <el-table-column prop="weight" label="加权系数" width="90"><template #default="{row}">{{(row.weight*100).toFixed(0)}}%</template></el-table-column>
+                                    <el-table-column prop="max_score" label="满分" width="70"></el-table-column>
+                                    <el-table-column label="可视化分级标尺" width="300">
+                                        <template #default="{row}">
+                                            <div v-if="row.color_levels" style="display:flex;gap:2px">
+                                                <div v-for="cl in row.color_levels" :key="cl.level" :style="{background:cl.color,color:'#fff',padding:'2px 8px',borderRadius:'3px',fontSize:'12px'}">{{cl.level}}({{cl.range}})</div>
+                                            </div>
+                                        </template>
+                                    </el-table-column>
+                                    <el-table-column label="操作" width="150"><template #default="{row}"><el-button size="small" text type="warning" @click="openDimensionDialog(row)">编辑</el-button><el-button size="small" text type="danger" @click="deleteDimension(row)">删除</el-button></template></el-table-column>
+                                </el-table>
+                            </el-card>
+                            <el-card style="margin-top:15px">
+                                <template #header>
+                                    <div style="display:flex;justify-content:space-between;align-items:center">
+                                        <span>风险扣分项配置</span>
+                                        <el-button type="primary" @click="openDeductionDialog()">新增扣分项</el-button>
+                                    </div>
+                                </template>
+                                <el-table :data="deductionList" border stripe>
+                                    <el-table-column prop="name" label="扣分项名称"></el-table-column>
+                                    <el-table-column prop="description" label="说明"></el-table-column>
+                                    <el-table-column prop="deduction_value" label="扣分值" width="80"></el-table-column>
+                                    <el-table-column label="风险等级" width="100"><template #default="{row}"><el-tag :type="row.risk_level==='高风险'?'danger':'warning'">{{row.risk_level}}</el-tag></template></el-table-column>
+                                    <el-table-column label="操作" width="150"><template #default="{row}"><el-button size="small" text type="warning" @click="openDeductionDialog(row)">编辑</el-button><el-button size="small" text type="danger" @click="deleteDeduction(row)">删除</el-button></template></el-table-column>
+                                </el-table>
+                            </el-card>
+                        </el-tab-pane>
+                        <el-tab-pane label="评估台账记录" name="records">
+                            <el-card>
+                                <template #header><span>评估台账记录</span></template>
+                                <el-form :inline="true" :model="assessmentQuery">
+                                    <el-form-item label="IP地址"><el-input v-model="assessmentQuery.ip_address" clearable></el-input></el-form-item>
+                                    <el-form-item label="数据源"><el-input v-model="assessmentQuery.data_source" clearable></el-input></el-form-item>
+                                    <el-form-item label="字段"><el-input v-model="assessmentQuery.source_field" clearable></el-input></el-form-item>
+                                    <el-form-item><el-button type="primary" @click="loadAssessmentRecords(1)">查询</el-button><el-button @click="resetAssessmentQuery">重置</el-button></el-form-item>
+                                </el-form>
+                                <el-table :data="assessmentRecords" border stripe>
+                                    <el-table-column prop="access_id" label="访问标识" width="160"></el-table-column>
+                                    <el-table-column prop="ip_address" label="IP地址" width="130"></el-table-column>
+                                    <el-table-column prop="data_source" label="数据源"></el-table-column>
+                                    <el-table-column prop="source_field" label="源字段" width="80"></el-table-column>
+                                    <el-table-column prop="assessment_time" label="评估时间" width="160"></el-table-column>
+                                    <el-table-column label="综合总分" width="90"><template #default="{row}"><span :style="{color:row.total_score>=90?'#67c23a':row.total_score>=70?'#409eff':row.total_score>=50?'#e6a23c':'#f56c6c',fontWeight:'bold'}">{{row.total_score}}</span></template></el-table-column>
+                                    <el-table-column label="风险等级" width="80"><template #default="{row}"><el-tag :type="row.risk_level==='优秀'?'success':row.risk_level==='良好'?'primary':row.risk_level==='一般'?'warning':'danger'">{{row.risk_level}}</el-tag></template></el-table-column>
+                                    <el-table-column label="操作" width="100"><template #default="{row}"><el-button size="small" text type="primary" @click="viewAssessmentDetail(row)">详情</el-button></template></el-table-column>
+                                </el-table>
+                                <el-pagination style="margin-top:15px;text-align:right" v-model:current-page="assessmentPage" :page-size="10" :total="assessmentTotal" layout="total, prev, pager, next" @current-change="loadAssessmentRecords"></el-pagination>
+                            </el-card>
+                        </el-tab-pane>
+                    </el-tabs>
+                </div>
+
+                <!-- Operation Logs -->
+                <div v-show="activeMenu==='log'">
+                    <el-card>
+                        <template #header><span>操作日志管理</span></template>
+                        <el-form :inline="true" :model="logQuery">
+                            <el-form-item label="操作类型"><el-input v-model="logQuery.operation_type" clearable placeholder="如:查询、新增"></el-input></el-form-item>
+                            <el-form-item label="操作详情"><el-input v-model="logQuery.operation_detail" clearable placeholder="关键词"></el-input></el-form-item>
+                            <el-form-item label="操作人"><el-input v-model="logQuery.operator" clearable></el-input></el-form-item>
+                            <el-form-item><el-button type="primary" @click="loadLogs(1)">查询</el-button><el-button @click="resetLogQuery">重置</el-button></el-form-item>
+                        </el-form>
+                        <el-table :data="logList" border stripe>
+                            <el-table-column prop="operation_time" label="操作时间" width="160"></el-table-column>
+                            <el-table-column prop="operation_type" label="操作类型" width="100"><template #default="{row}"><el-tag>{{row.operation_type}}</el-tag></template></el-table-column>
+                            <el-table-column prop="operator" label="操作人" width="80"></el-table-column>
+                            <el-table-column prop="request_url" label="请求地址" width="250"></el-table-column>
+                            <el-table-column prop="operation_detail" label="操作详情"></el-table-column>
+                            <el-table-column prop="ip_address" label="IP" width="120"></el-table-column>
+                        </el-table>
+                        <el-pagination style="margin-top:15px;text-align:right" v-model:current-page="logPage" :page-size="10" :total="logTotal" layout="total, prev, pager, next" @current-change="loadLogs"></el-pagination>
+                    </el-card>
+                </div>
+
+                <!-- Security Config -->
+                <div v-show="activeMenu==='security'">
+                    <el-tabs v-model="securityTab">
+                        <el-tab-pane label="密码策略" name="password">
+                            <el-card>
+                                <template #header><span>密码策略配置</span></template>
+                                <el-form label-width="200px" style="max-width:600px">
+                                    <el-form-item label="密码历史留存规则(次)">
+                                        <el-input-number v-model="securityConfig.password_history_count" :min="0" :max="10"></el-input-number>
+                                    </el-form-item>
+                                    <el-form-item label="密码有效天数">
+                                        <el-input-number v-model="securityConfig.password_valid_days" :min="30" :max="365"></el-input-number>
+                                    </el-form-item>
+                                    <el-form-item label="密码到期前置提醒天数">
+                                        <el-input-number v-model="securityConfig.password_expire_remind_days" :min="1" :max="30"></el-input-number>
+                                    </el-form-item>
+                                    <el-form-item label="密码最小长度">
+                                        <el-input-number v-model="securityConfig.password_min_length" :min="6" :max="32"></el-input-number>
+                                    </el-form-item>
+                                    <el-form-item label="密码复杂度说明">
+                                        <el-input type="textarea" v-model="securityConfig.password_complexity_desc" :rows="3"></el-input>
+                                    </el-form-item>
+                                    <el-form-item><el-button type="primary" @click="saveSecurityConfig">保存配置</el-button></el-form-item>
+                                </el-form>
+                            </el-card>
+                        </el-tab-pane>
+                        <el-tab-pane label="登录安全" name="login">
+                            <el-card>
+                                <template #header><span>登录安全限制配置</span></template>
+                                <el-form label-width="200px" style="max-width:600px">
+                                    <el-form-item label="登录失败锁定次数阈值">
+                                        <el-input-number v-model="securityConfig.login_fail_lock_threshold" :min="3" :max="10"></el-input-number>
+                                    </el-form-item>
+                                    <el-form-item label="账号锁定持续时长(分钟)">
+                                        <el-input-number v-model="securityConfig.account_lock_duration" :min="5" :max="120"></el-input-number>
+                                    </el-form-item>
+                                    <el-form-item label="会话空闲超时时间(分钟)">
+                                        <el-input-number v-model="securityConfig.session_idle_timeout" :min="5" :max="120"></el-input-number>
+                                    </el-form-item>
+                                    <el-form-item><el-button type="primary" @click="saveSecurityConfig">保存配置</el-button></el-form-item>
+                                </el-form>
+                            </el-card>
+                        </el-tab-pane>
+                        <el-tab-pane label="访问权限" name="ip">
+                            <el-card>
+                                <template #header>
+                                    <div style="display:flex;justify-content:space-between;align-items:center">
+                                        <span>IP访问权限管控 <el-tag type="info" size="small">系统默认放开全部IP访问权限</el-tag></span>
+                                        <el-button type="primary" @click="openIpAccessDialog()">新增授权IP段</el-button>
+                                    </div>
+                                </template>
+                                <el-table :data="ipAccessList" border stripe>
+                                    <el-table-column prop="ip_segment" label="IP地址段"></el-table-column>
+                                    <el-table-column prop="description" label="描述"></el-table-column>
+                                    <el-table-column label="状态" width="80"><template #default="{row}"><el-tag :type="row.enabled?'success':'info'">{{row.enabled?'启用':'禁用'}}</el-tag></template></el-table-column>
+                                    <el-table-column prop="created_at" label="创建时间" width="160"></el-table-column>
+                                    <el-table-column label="操作" width="150"><template #default="{row}"><el-button size="small" text type="warning" @click="toggleIpAccess(row)">切换状态</el-button><el-button size="small" text type="danger" @click="deleteIpAccess(row)">删除</el-button></template></el-table-column>
+                                </el-table>
+                            </el-card>
+                        </el-tab-pane>
+                    </el-tabs>
+                </div>
+            </el-main>
+        </el-container>
+    </el-container>
+
+    <!-- Dialogs -->
+    <!-- Manual Fix Dialog -->
+    <el-dialog v-model="showManualFixDialog" title="人工修正IP主体信息" width="500px">
+        <el-form :model="manualFixForm" label-width="100px">
+            <el-form-item label="IP地址"><el-input v-model="manualFixForm.ip_address" disabled></el-input></el-form-item>
+            <el-form-item label="修正字段"><el-select v-model="manualFixForm.field_name"><el-option label="用户名" value="user_name"/><el-option label="手机号" value="phone"/><el-option label="地址" value="address"/><el-option label="单位名称" value="unit_name"/></el-select></el-form-item>
+            <el-form-item label="修正值"><el-input v-model="manualFixForm.field_value"></el-input></el-form-item>
+            <el-form-item label="修正原因"><el-input type="textarea" v-model="manualFixForm.reason" :rows="3"></el-input></el-form-item>
+        </el-form>
+        <template #footer><el-button @click="showManualFixDialog=false">取消</el-button><el-button type="primary" @click="submitManualFix">提交修正(生成工单)</el-button></template>
+    </el-dialog>
+
+    <!-- Sensitive Info Approval Dialog -->
+    <el-dialog v-model="showSensitiveDialog" title="查看敏感信息(审批)" width="500px">
+        <el-form :model="sensitiveForm" label-width="100px">
+            <el-form-item label="IP地址"><el-input v-model="sensitiveForm.target_ip" disabled></el-input></el-form-item>
+            <el-form-item label="敏感字段"><el-select v-model="sensitiveForm.target_field"><el-option label="用户姓名" value="user_name"/><el-option label="手机号" value="phone"/><el-option label="地址" value="address"/><el-option label="单位名称" value="unit_name"/><el-option label="身份证号" value="id_card"/></el-select></el-form-item>
+            <el-form-item label="审批人"><el-input v-model="sensitiveForm.approver" placeholder="输入审批人姓名"></el-input></el-form-item>
+        </el-form>
+        <div v-if="sensitiveResult">
+            <el-alert :title="'验证码已发送给审批人:' + sensitiveForm.approver" type="success" :closable="false"></el-alert>
+            <el-form-item label="验证码" style="margin-top:10px"><el-input v-model="sensitiveVerifyCode" placeholder="输入验证码"></el-input></el-form-item>
+        </div>
+        <template #footer>
+            <el-button @click="showSensitiveDialog=false">关闭</el-button>
+            <el-button v-if="!sensitiveResult" type="primary" @click="requestSensitiveApproval">申请审批</el-button>
+            <el-button v-else type="success" @click="verifySensitiveApproval">验证查看</el-button>
+        </template>
+    </el-dialog>
+
+    <!-- Location Detail Dialog -->
+    <el-dialog v-model="showLocationDialog" title="定位详情(溯源字段、定位值、数据源)" width="700px">
+        <el-descriptions :column="2" border v-if="locationDetail">
+            <el-descriptions-item label="溯源字段">{{ locationDetail.field_name }}</el-descriptions-item>
+            <el-descriptions-item label="定位值">{{ locationDetail.trace_value }}</el-descriptions-item>
+            <el-descriptions-item label="数据源">{{ locationDetail.data_source }}</el-descriptions-item>
+            <el-descriptions-item label="归属地">{{ locationDetail.location }}</el-descriptions-item>
+            <el-descriptions-item label="接入节点">{{ locationDetail.access_node }}</el-descriptions-item>
+            <el-descriptions-item label="IP类型">{{ locationDetail.ip_type }}</el-descriptions-item>
+            <el-descriptions-item label="场景类型">{{ locationDetail.scene_type }}</el-descriptions-item>
+            <el-descriptions-item label="原始数据">{{ locationDetail.raw_data }}</el-descriptions-item>
+        </el-descriptions>
+    </el-dialog>
+
+    <!-- Task Result Dialog -->
+    <el-dialog v-model="showTaskResultDialog" title="主体信息定位结果" width="800px">
+        <el-descriptions :column="2" border v-if="taskDetail">
+            <el-descriptions-item label="任务名">{{ taskDetail.task.task_name }}</el-descriptions-item>
+            <el-descriptions-item label="IP地址">{{ taskDetail.task.ip_address }}</el-descriptions-item>
+            <el-descriptions-item label="IP版本">{{ taskDetail.task.ip_version }}</el-descriptions-item>
+            <el-descriptions-item label="场景">{{ taskDetail.task.scene_type }}</el-descriptions-item>
+            <el-descriptions-item label="开始时间">{{ taskDetail.task.start_time }}</el-descriptions-item>
+            <el-descriptions-item label="结束时间">{{ taskDetail.task.end_time }}</el-descriptions-item>
+            <el-descriptions-item label="结果数">{{ taskDetail.task.result_count }}</el-descriptions-item>
+            <el-descriptions-item label="状态">{{ taskDetail.task.status }}</el-descriptions-item>
+        </el-descriptions>
+        <el-table v-if="taskDetail" :data="taskDetail.results" border style="margin-top:15px">
+            <el-table-column prop="user_name" label="用户名(脱敏)" width="100"></el-table-column>
+            <el-table-column prop="phone" label="手机号(脱敏)" width="120"></el-table-column>
+            <el-table-column prop="unit_name" label="单位名称"></el-table-column>
+            <el-table-column prop="address" label="地址(脱敏)"></el-table-column>
+            <el-table-column prop="data_source" label="数据源" width="120"></el-table-column>
+        </el-table>
+    </el-dialog>
+
+    <!-- Task Path Replay Dialog -->
+    <el-dialog v-model="showTaskPathDialog" title="路径查询回放" width="700px">
+        <el-timeline v-if="taskDetail">
+            <el-timeline-item v-for="(p,idx) in taskDetail.paths" :key="idx" :type="p.status==='success'?'success':'danger'" :timestamp="p.started_at" placement="top">
+                <el-card><h4>{{ p.node_name }} <el-tag size="small">{{p.node_type}}</el-tag></h4><p>{{ p.detail }}</p><p v-if="p.data_source">数据源: {{ p.data_source }}</p></el-card>
+            </el-timeline-item>
+        </el-timeline>
+    </el-dialog>
+
+    <!-- Data Source Dialog -->
+    <el-dialog v-model="showDsDialog" :title="dsForm.id?'编辑数据源':'新增数据源'" width="600px">
+        <el-form :model="dsForm" label-width="120px">
+            <el-form-item label="数据源名称"><el-input v-model="dsForm.name"></el-input></el-form-item>
+            <el-form-item label="数据源类型"><el-select v-model="dsForm.source_type"><el-option label="移网" value="移网"/><el-option label="家宽" value="家宽"/><el-option label="专线" value="专线"/><el-option label="IDC" value="IDC"/><el-option label="自有业务" value="自有业务"/><el-option label="其他" value="其他"/></el-select></el-form-item>
+            <el-form-item label="数据源权威性"><el-select v-model="dsForm.authority_level"><el-option label="高" value="高"/><el-option label="中" value="中"/><el-option label="低" value="低"/></el-select></el-form-item>
+            <el-form-item label="负责人"><el-input v-model="dsForm.owner"></el-input></el-form-item>
+            <el-form-item label="联系方式"><el-input v-model="dsForm.contact"></el-input></el-form-item>
+            <el-form-item label="描述"><el-input type="textarea" v-model="dsForm.description" :rows="2"></el-input></el-form-item>
+            <el-form-item label="告警监控"><el-switch v-model="dsForm.alarm_enabled" :active-value="1" :inactive-value="0"></el-switch></el-form-item>
+            <el-form-item label="配置属性"><el-input type="textarea" v-model="dsForm.config_attrs" :rows="2" placeholder='JSON格式,如:{"source":"AAA系统"}'></el-input></el-form-item>
+        </el-form>
+        <template #footer><el-button @click="showDsDialog=false">取消</el-button><el-button type="primary" @click="saveDataSource">保存</el-button></template>
+    </el-dialog>
+
+    <!-- Data Source Detail Dialog -->
+    <el-dialog v-model="showDsDetailDialog" title="数据源详情" width="600px">
+        <el-descriptions v-if="dsDetail" :column="1" border>
+            <el-descriptions-item label="数据源名称">{{ dsDetail.name }}</el-descriptions-item>
+            <el-descriptions-item label="数据源类型">{{ dsDetail.source_type }}</el-descriptions-item>
+            <el-descriptions-item label="数据源权威性">{{ dsDetail.authority_level }}</el-descriptions-item>
+            <el-descriptions-item label="负责人">{{ dsDetail.owner }}</el-descriptions-item>
+            <el-descriptions-item label="联系方式">{{ dsDetail.contact }}</el-descriptions-item>
+            <el-descriptions-item label="描述">{{ dsDetail.description }}</el-descriptions-item>
+            <el-descriptions-item label="告警监控">{{ dsDetail.alarm_enabled ? '开启' : '关闭' }}</el-descriptions-item>
+            <el-descriptions-item label="配置属性">{{ dsDetail.config_attrs }}</el-descriptions-item>
+            <el-descriptions-item label="状态">{{ dsDetail.status }}</el-descriptions-item>
+        </el-descriptions>
+    </el-dialog>
+
+    <!-- Template Dialog -->
+    <el-dialog v-model="showTemplateDialog" :title="templateForm.id?'编辑模板':'新建模板'" width="500px">
+        <el-form :model="templateForm" label-width="100px">
+            <el-form-item label="模板名称"><el-input v-model="templateForm.name"></el-input></el-form-item>
+            <el-form-item label="场景类型"><el-select v-model="templateForm.scene_type"><el-option label="移网" value="移网"/><el-option label="家宽" value="家宽"/><el-option label="专线" value="专线"/><el-option label="IDC" value="IDC"/><el-option label="自有业务" value="自有业务"/></el-select></el-form-item>
+            <el-form-item label="描述"><el-input type="textarea" v-model="templateForm.description" :rows="2"></el-input></el-form-item>
+        </el-form>
+        <template #footer><el-button @click="showTemplateDialog=false">取消</el-button><el-button type="primary" @click="saveTemplate">保存</el-button></template>
+    </el-dialog>
+
+    <!-- Field Management Dialog -->
+    <el-dialog v-model="showFieldDialog" title="主体信息字段管理" width="800px">
+        <el-table :data="fieldList" border>
+            <el-table-column prop="field_name" label="字段名称"></el-table-column>
+            <el-table-column prop="field_label" label="字段标签" width="100"></el-table-column>
+            <el-table-column prop="field_type" label="类型" width="80"></el-table-column>
+            <el-table-column label="必填" width="60"><template #default="{row}"><el-tag :type="row.is_required?'danger':'info'">{{row.is_required?'是':'否'}}</el-tag></template></el-table-column>
+            <el-table-column label="加密" width="60"><template #default="{row}"><el-tag :type="row.is_encrypted?'warning':'info'">{{row.is_encrypted?'是':'否'}}</el-tag></template></el-table-column>
+            <el-table-column label="敏感" width="60"><template #default="{row}"><el-tag :type="row.is_sensitive?'danger':'info'">{{row.is_sensitive?'是':'否'}}</el-tag></template></el-table-column>
+            <el-table-column prop="field_order" label="排序" width="60"></el-table-column>
+            <el-table-column label="操作" width="150"><template #default="{row}"><el-button size="small" text type="warning" @click="openEditField(row)">编辑</el-button><el-button size="small" text type="danger" @click="deleteField(row)">删除</el-button></template></el-table-column>
+        </el-table>
+        <el-divider>新增/编辑字段</el-divider>
+        <el-form :model="fieldForm" :inline="true">
+            <el-form-item label="字段名"><el-input v-model="fieldForm.field_name" style="width:120px"></el-input></el-form-item>
+            <el-form-item label="标签"><el-input v-model="fieldForm.field_label" style="width:100px"></el-input></el-form-item>
+            <el-form-item label="类型"><el-input v-model="fieldForm.field_type" style="width:80px"></el-input></el-form-item>
+            <el-form-item label="必填"><el-switch v-model="fieldForm.is_required" :active-value="1" :inactive-value="0"></el-switch></el-form-item>
+            <el-form-item label="加密"><el-switch v-model="fieldForm.is_encrypted" :active-value="1" :inactive-value="0"></el-switch></el-form-item>
+            <el-form-item label="敏感"><el-switch v-model="fieldForm.is_sensitive" :active-value="1" :inactive-value="0"></el-switch></el-form-item>
+            <el-form-item label="排序"><el-input-number v-model="fieldForm.field_order" :min="0" style="width:80px"></el-input-number></el-form-item>
+            <el-form-item><el-button type="primary" @click="saveField">{{fieldForm.id?'更新':'新增'}}</el-button><el-button @click="resetFieldForm">重置</el-button></el-form-item>
+        </el-form>
+    </el-dialog>
+
+    <!-- Template Detail Dialog -->
+    <el-dialog v-model="showTemplateDetailDialog" title="模板详情" width="700px">
+        <el-descriptions :column="2" border v-if="templateDetail">
+            <el-descriptions-item label="模板名称">{{ templateDetail.name }}</el-descriptions-item>
+            <el-descriptions-item label="场景类型">{{ templateDetail.scene_type }}</el-descriptions-item>
+            <el-descriptions-item label="描述">{{ templateDetail.description }}</el-descriptions-item>
+            <el-descriptions-item label="字段数">{{ templateDetail.fields ? templateDetail.fields.length : 0 }}</el-descriptions-item>
+        </el-descriptions>
+        <el-table :data="templateDetail?templateDetail.fields:[]" border style="margin-top:15px">
+            <el-table-column prop="field_name" label="字段名称"></el-table-column>
+            <el-table-column prop="field_label" label="标签" width="100"></el-table-column>
+            <el-table-column label="必填" width="60"><template #default="{row}">{{row.is_required?'是':'否'}}</template></el-table-column>
+            <el-table-column label="加密" width="60"><template #default="{row}">{{row.is_encrypted?'是':'否'}}</template></el-table-column>
+            <el-table-column prop="description" label="说明"></el-table-column>
+        </el-table>
+    </el-dialog>
+
+    <!-- Scene Dialog -->
+    <el-dialog v-model="showSceneDialog" :title="sceneForm.id?'编辑场景':'新增场景'" width="500px">
+        <el-form :model="sceneForm" label-width="100px">
+            <el-form-item label="场景名称"><el-input v-model="sceneForm.name"></el-input></el-form-item>
+            <el-form-item label="场景类型"><el-select v-model="sceneForm.scene_type"><el-option label="移网" value="移网"/><el-option label="家宽" value="家宽"/><el-option label="专线" value="专线"/><el-option label="IDC" value="IDC"/><el-option label="自有业务" value="自有业务"/></el-select></el-form-item>
+            <el-form-item label="IP地址范围"><el-input v-model="sceneForm.ip_range" placeholder="如:10.0.0.0/8,100.64.0.0/10"></el-input></el-form-item>
+            <el-form-item label="描述"><el-input type="textarea" v-model="sceneForm.description" :rows="2"></el-input></el-form-item>
+        </el-form>
+        <template #footer><el-button @click="showSceneDialog=false">取消</el-button><el-button type="primary" @click="saveScene">保存</el-button></template>
+    </el-dialog>
+
+    <!-- Path Builder Dialog (drag-drop) -->
+    <el-dialog v-model="showPathBuilder" title="场景查询路径配置(可视化拖拽构建)" width="900px" top="5vh">
+        <div class="path-builder-toolbar">
+            <el-button size="small" @click="addNode('start')" type="primary">+ 开始节点</el-button>
+            <el-button size="small" @click="addNode('execute')" type="success">+ 执行节点</el-button>
+            <el-button size="small" @click="addNode('judge')" type="warning">+ 判断节点</el-button>
+            <el-button size="small" @click="clearCanvas" type="danger">清空画布</el-button>
+            <el-button size="small" @click="savePath" type="primary">保存路径</el-button>
+            <el-button size="small" @click="publishPath" type="success">发布生效</el-button>
+            <el-tag>提示: 点击节点后点击另一节点可连线, 右键节点可删除</el-tag>
+        </div>
+        <div class="path-canvas" ref="pathCanvas" @contextmenu.prevent="handleCanvasRightClick">
+            <div v-for="node in pathNodes" :key="node.id"
+                 class="path-node"
+                 :class="'node-'+node.type"
+                 :style="{left: node.x+'px', top: node.y+'px'}"
+                 @click="selectNode(node)"
+                 @contextmenu.prevent.stop="deleteNode(node)">
+                <el-icon><component :is="node.type==='start'?'Flag':node.type==='judge'?'Switch':'Cpu'"/></el-icon>
+                <span>{{ node.name }}</span>
+            </div>
+            <svg class="path-edges" v-if="pathEdges.length">
+                <line v-for="(edge,idx) in pathEdges" :key="idx"
+                      :x1="getNodePos(edge.from).x+60" :y1="getNodePos(edge.from).y+20"
+                      :x2="getNodePos(edge.to).x" :y2="getNodePos(edge.to).y+20"
+                      stroke="#409EFF" stroke-width="2" marker-end="url(#arrow)"/>
+                <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#409EFF"/></marker></defs>
+            </svg>
+        </div>
+        <div v-if="currentPathInfo" style="margin-top:10px">
+            <el-tag>路径名称: {{currentPathInfo.name || '未命名'}}</el-tag>
+            <el-input v-model="currentPathInfo.name" placeholder="路径名称" style="width:200px;margin-left:10px"></el-input>
+            <el-tag style="margin-left:10px">节点数: {{pathNodes.length}}</el-tag>
+            <el-tag style="margin-left:10px" :type="currentPathInfo.status==='published'?'success':'info'">状态: {{currentPathInfo.status || 'draft'}}</el-tag>
+        </div>
+    </el-dialog>
+
+    <!-- Conflict Detail Dialog -->
+    <el-dialog v-model="showConflictDetailDialog" title="冲突工单详情" width="700px">
+        <el-descriptions v-if="conflictDetail" :column="2" border>
+            <el-descriptions-item label="工单号">{{ conflictDetail.ticket_no }}</el-descriptions-item>
+            <el-descriptions-item label="IP地址">{{ conflictDetail.ip_address }}</el-descriptions-item>
+            <el-descriptions-item label="冲突来源">{{ conflictDetail.conflict_source }}</el-descriptions-item>
+            <el-descriptions-item label="冲突类型">{{ conflictDetail.conflict_type }}</el-descriptions-item>
+            <el-descriptions-item label="冲突字段">{{ conflictDetail.field_name }}</el-descriptions-item>
+            <el-descriptions-item label="状态">{{ conflictDetail.status }}</el-descriptions-item>
+            <el-descriptions-item label="处置建议" :span="2">{{ conflictDetail.suggestion }}</el-descriptions-item>
+            <el-descriptions-item label="冲突描述" :span="2">{{ conflictDetail.conflict_desc }}</el-descriptions-item>
+            <el-descriptions-item label="源数据值" :span="2">{{ conflictDetail.source_values }}</el-descriptions-item>
+        </el-descriptions>
+        <el-divider>工单生命周期时间线</el-divider>
+        <el-timeline v-if="conflictLifecycle">
+            <el-timeline-item v-for="(lc,idx) in conflictLifecycle" :key="idx" :timestamp="lc.time" placement="top">
+                <el-card><h4>{{ lc.node }}</h4><p>操作人: {{ lc.operator }}</p><p v-if="lc.remark">备注: {{ lc.remark }}</p></el-card>
+            </el-timeline-item>
+        </el-timeline>
+    </el-dialog>
+
+    <!-- Process Conflict Dialog -->
+    <el-dialog v-model="showProcessDialog" :title="'工单处理 - ' + processForm.action" width="500px">
+        <el-form :model="processForm" label-width="100px">
+            <el-form-item label="处理动作"><el-tag>{{ processForm.action==='fix'?'手动修正':processForm.action==='verify'?'治理校验':'详情查阅' }}</el-tag></el-form-item>
+            <el-form-item label="处理备注"><el-input type="textarea" v-model="processForm.handle_remark" :rows="3"></el-input></el-form-item>
+            <el-form-item label="证据材料"><el-input v-model="processForm.handle_evidence" placeholder="输入证据材料说明"></el-input></el-form-item>
+        </el-form>
+        <template #footer><el-button @click="showProcessDialog=false">取消</el-button><el-button type="primary" @click="submitProcessConflict">提交</el-button></template>
+    </el-dialog>
+
+    <!-- Dimension Dialog -->
+    <el-dialog v-model="showDimensionDialog" :title="dimensionForm.id?'编辑维度':'新增维度'" width="500px">
+        <el-form :model="dimensionForm" label-width="100px">
+            <el-form-item label="维度名称"><el-input v-model="dimensionForm.name"></el-input></el-form-item>
+            <el-form-item label="维度说明"><el-input type="textarea" v-model="dimensionForm.description" :rows="2"></el-input></el-form-item>
+            <el-form-item label="加权系数"><el-input-number v-model="dimensionForm.weight" :min="0" :max="1" :step="0.05"></el-input-number></el-form-item>
+            <el-form-item label="满分分值"><el-input-number v-model="dimensionForm.max_score" :min="1" :max="100"></el-input-number></el-form-item>
+        </el-form>
+        <template #footer><el-button @click="showDimensionDialog=false">取消</el-button><el-button type="primary" @click="saveDimension">保存</el-button></template>
+    </el-dialog>
+
+    <!-- Deduction Dialog -->
+    <el-dialog v-model="showDeductionDialog" :title="deductionForm.id?'编辑扣分项':'新增扣分项'" width="500px">
+        <el-form :model="deductionForm" label-width="100px">
+            <el-form-item label="名称"><el-input v-model="deductionForm.name"></el-input></el-form-item>
+            <el-form-item label="说明"><el-input type="textarea" v-model="deductionForm.description" :rows="2"></el-input></el-form-item>
+            <el-form-item label="扣分值"><el-input-number v-model="deductionForm.deduction_value" :min="1" :max="100"></el-input-number></el-form-item>
+            <el-form-item label="风险等级"><el-select v-model="deductionForm.risk_level"><el-option label="可疑" value="可疑"/><el-option label="高风险" value="高风险"/></el-select></el-form-item>
+        </el-form>
+        <template #footer><el-button @click="showDeductionDialog=false">取消</el-button><el-button type="primary" @click="saveDeduction">保存</el-button></template>
+    </el-dialog>
+
+    <!-- Assessment Detail Dialog -->
+    <el-dialog v-model="showAssessmentDetailDialog" title="评估详情" width="700px">
+        <el-descriptions v-if="assessmentDetailData" :column="2" border>
+            <el-descriptions-item label="访问标识">{{ assessmentDetailData.access_id }}</el-descriptions-item>
+            <el-descriptions-item label="IP地址">{{ assessmentDetailData.ip_address }}</el-descriptions-item>
+            <el-descriptions-item label="数据源">{{ assessmentDetailData.data_source }}</el-descriptions-item>
+            <el-descriptions-item label="源字段">{{ assessmentDetailData.source_field }}</el-descriptions-item>
+            <el-descriptions-item label="评估时间">{{ assessmentDetailData.assessment_time }}</el-descriptions-item>
+            <el-descriptions-item label="综合总分"><span :style="{color:assessmentDetailData.total_score>=90?'#67c23a':'#f56c6c',fontWeight:'bold',fontSize:'18px'}">{{ assessmentDetailData.total_score }}</span></el-descriptions-item>
+            <el-descriptions-item label="风险等级"><el-tag>{{ assessmentDetailData.risk_level }}</el-tag></el-descriptions-item>
+        </el-descriptions>
+        <el-divider>各维度分项得分</el-divider>
+        <el-table :data="assessmentDetailScores" border v-if="assessmentDetailData">
+            <el-table-column prop="name" label="维度"></el-table-column>
+            <el-table-column prop="score" label="得分"></el-table-column>
+        </el-table>
+        <el-divider>扣分项</el-divider>
+        <el-table :data="assessmentDetailData.deductions" border v-if="assessmentDetailData">
+            <el-table-column prop="name" label="扣分项"></el-table-column>
+            <el-table-column prop="value" label="扣分值" width="100"></el-table-column>
+        </el-table>
+    </el-dialog>
+
+    <!-- IP Access Dialog -->
+    <el-dialog v-model="showIpAccessDialog" title="新增授权IP段" width="400px">
+        <el-form :model="ipAccessForm" label-width="80px">
+            <el-form-item label="IP段"><el-input v-model="ipAccessForm.ip_segment" placeholder="如:10.0.0.0/8"></el-input></el-form-item>
+            <el-form-item label="描述"><el-input v-model="ipAccessForm.description"></el-input></el-form-item>
+        </el-form>
+        <template #footer><el-button @click="showIpAccessDialog=false">取消</el-button><el-button type="primary" @click="saveIpAccess">保存</el-button></template>
+    </el-dialog>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
