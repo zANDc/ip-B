@@ -896,6 +896,224 @@ def create_conflict(req: ConflictCreateRequest, request: Request):
         return {"id": ct_id, "ticket_no": ticket_no, "message": "冲突工单创建成功"}
 
 
+# ============ IP Subject Data Import ============
+
+# 导入模板的列定义: (Excel列名, 数据库字段名, 是否必填)
+IMPORT_COLUMNS = [
+    ("IP地址", "ip_address", True),
+    ("IP版本", "ip_version", False),
+    ("场景类型", "scene_type", False),
+    ("端口", "port", False),
+    ("开始时间", "start_time", False),
+    ("结束时间", "end_time", False),
+    ("用户名", "user_name", False),
+    ("用户ID", "user_id", False),
+    ("电话", "phone", False),
+    ("地址", "address", False),
+    ("单位名称", "unit_name", False),
+    ("身份证号", "id_card", False),
+    ("带宽", "bandwidth", False),
+    ("IP类型", "ip_type", False),
+    ("数据源", "data_source", False),
+    ("位置", "location", False),
+    ("接入节点", "access_node", False),
+    ("开户时间", "create_time", False),
+]
+
+
+@app.get("/api/subjects/import/template")
+def download_subject_import_template(request: Request):
+    """下载IP主体数据导入模板。"""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "IP主体数据导入"
+    headers = [c[0] for c in IMPORT_COLUMNS]
+    header_fill = PatternFill(start_color="409EFF", end_color="409EFF", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True, size=11)
+    thin_border = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin")
+    )
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+        cell.border = thin_border
+
+    # 示例行
+    samples = [
+        ["10.0.1.200", "IPv4", "移网", "0", "2026-01-01 00:00:00", "2026-01-01 23:59:59",
+         "张三", "USER_100", "13800001234", "合肥市蜀山区黄山路", "安徽移动",
+         "340100199001011234", "100M", "动态", "移网AAA数据源", "安徽合肥-蜀山", "SGSN-001", "2026-01-01 08:30:00"],
+        ["192.168.1.200", "IPv4", "家宽", "0", "2026-01-01 00:00:00", "2026-01-01 23:59:59",
+         "李四", "USER_101", "13600005678", "合肥市包河区马鞍山路", "安徽移动",
+         "340111199004044567", "300M", "动态", "家宽BRAS数据源", "安徽合肥-包河", "BRAS-001", "2026-01-01 08:20:00"],
+        ["2408:8000:1::200", "IPv6", "移网", "0", "2026-01-01 00:00:00", "2026-01-01 23:59:59",
+         "王五", "USER_102", "13700009000", "蚌埠市蚌山区东海大道", "安徽移动",
+         "340300199003033456", "100M", "动态", "移网AAA数据源", "安徽蚌埠-蚌山", "SGSN-003", "2026-01-01 08:15:00"],
+    ]
+    for row_idx, row in enumerate(samples, 2):
+        for col_idx, val in enumerate(row, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal="center")
+
+    # 标注必填列（第一列标红注释）
+    ws.cell(row=len(samples) + 3, column=1, value="说明：")
+    ws.cell(row=len(samples) + 4, column=1, value="1. IP地址为必填字段")
+    ws.cell(row=len(samples) + 5, column=1, value="2. IP版本留空时自动识别（含:为IPv6）")
+    ws.cell(row=len(samples) + 6, column=1, value="3. 场景类型可选：移网/家宽/专线/IDC/自有业务")
+    ws.cell(row=len(samples) + 7, column=1, value="4. 敏感字段（用户名/电话/身份证号）会自动脱敏存储")
+    ws.cell(row=len(samples) + 8, column=1, value="5. 导入模式为追加，不会删除已有数据")
+    ws.cell(row=len(samples) + 9, column=1, value="6. 如需清空旧数据，请先在数据源管理中删除对应数据")
+
+    # 列宽
+    widths = [18, 10, 10, 8, 22, 22, 14, 14, 14, 22, 16, 20, 10, 10, 16, 14, 14, 22]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[chr(64 + i) if i <= 26 else chr(64 + (i - 1) // 26) + chr(65 + (i - 1) % 26)].width = w
+
+    with get_conn() as conn:
+        log_operation(conn, "下载", "admin", str(request.url), "下载IP主体数据导入模板", get_client_ip(request))
+
+    return _xlsx_response(wb, "IP_subjects_import_template")
+
+
+@app.post("/api/subjects/import")
+async def import_subjects(request: Request, file: UploadFile = File(...)):
+    """通过Excel导入IP主体数据。导入模式为追加，不会删除已有数据。"""
+    MAX_SIZE = 10 * 1024 * 1024
+    content = await file.read()
+    if len(content) > MAX_SIZE:
+        raise HTTPException(400, "文件大小超出限制(最大10MB)，请减小文件后重试")
+    if not file.filename.endswith(".xlsx"):
+        raise HTTPException(400, "仅支持xlsx格式文件")
+
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(content))
+    ws = wb.active
+
+    # 读取表头，建立列索引映射
+    header_row = {}
+    for col in range(1, ws.max_column + 1):
+        header = ws.cell(row=1, column=col).value
+        if header:
+            header_row[str(header).strip()] = col
+
+    # 验证必填列存在
+    for col_name, db_field, required in IMPORT_COLUMNS:
+        if required and col_name not in header_row:
+            raise HTTPException(400, f"缺少必填列：{col_name}")
+
+    imported = 0
+    errors = []
+    with get_conn() as conn:
+        for row_idx in range(2, ws.max_row + 1):
+            ip = ws.cell(row=row_idx, column=header_row.get("IP地址", 1)).value
+            if not ip:
+                continue
+            ip = str(ip).strip()
+            if not ip:
+                continue
+
+            # 构建字段值字典
+            row_data = {}
+            for col_name, db_field, _ in IMPORT_COLUMNS:
+                col_idx = header_row.get(col_name)
+                if col_idx:
+                    val = ws.cell(row=row_idx, column=col_idx).value
+                    row_data[db_field] = str(val).strip() if val else ""
+                else:
+                    row_data[db_field] = ""
+
+            # 自动识别IP版本
+            if not row_data.get("ip_version"):
+                row_data["ip_version"] = "IPv6" if is_ipv6(ip) else "IPv4"
+
+            # 校验IP地址格式
+            if row_data["ip_version"] == "IPv4" and not validate_ipv4(ip):
+                errors.append(f"第{row_idx}行: IPv4地址格式不正确 ({ip})")
+                continue
+            if row_data["ip_version"] == "IPv6" and not validate_ipv6(ip):
+                errors.append(f"第{row_idx}行: IPv6地址格式不正确 ({ip})")
+                continue
+
+            # 敏感字段自动脱敏
+            user_name_plain = row_data.get("user_name", "")
+            phone_plain = row_data.get("phone", "")
+            id_card_plain = row_data.get("id_card", "")
+            address_plain = row_data.get("address", "")
+            unit_name_plain = row_data.get("unit_name", "")
+
+            row_data["user_name_plain"] = user_name_plain
+            row_data["phone_plain"] = phone_plain
+            row_data["id_card_plain"] = id_card_plain
+            row_data["address_plain"] = address_plain
+            row_data["unit_name_plain"] = unit_name_plain
+
+            row_data["user_name"] = mask_value(user_name_plain) if user_name_plain else ""
+            row_data["phone"] = mask_value(phone_plain) if phone_plain else ""
+            row_data["address"] = mask_value(address_plain) if address_plain else ""
+            row_data["unit_name"] = mask_value(unit_name_plain) if unit_name_plain else ""
+            # 身份证号脱敏：前6后4
+            if id_card_plain and id_card_plain != "-" and len(id_card_plain) > 10:
+                row_data["id_card"] = id_card_plain[:6] + "********" + id_card_plain[-4:]
+            elif id_card_plain:
+                row_data["id_card"] = id_card_plain
+
+            # 构建raw_data
+            raw = json.dumps({
+                "ip": ip, "version": row_data["ip_version"],
+                "user": user_name_plain, "phone": phone_plain,
+                "unit": unit_name_plain, "source": row_data.get("data_source", "")
+            }, ensure_ascii=False)
+
+            sid = gen_id("ip_")
+            conn.execute(
+                """INSERT INTO ip_subjects (id, ip_address, ip_version, scene_type, port, start_time, end_time,
+                   user_name, user_name_plain, user_id, phone, phone_plain, address, address_plain,
+                   unit_name, unit_name_plain, id_card, id_card_plain, bandwidth, ip_type, data_source,
+                   data_source_id, location, access_node, create_time, raw_data, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (sid, ip, row_data.get("ip_version", ""), row_data.get("scene_type", ""),
+                 row_data.get("port", ""), row_data.get("start_time", ""), row_data.get("end_time", ""),
+                 row_data.get("user_name", ""), row_data.get("user_name_plain", ""),
+                 row_data.get("user_id", ""), row_data.get("phone", ""), row_data.get("phone_plain", ""),
+                 row_data.get("address", ""), row_data.get("address_plain", ""),
+                 row_data.get("unit_name", ""), row_data.get("unit_name_plain", ""),
+                 row_data.get("id_card", ""), row_data.get("id_card_plain", ""),
+                 row_data.get("bandwidth", ""), row_data.get("ip_type", ""),
+                 row_data.get("data_source", ""), None,
+                 row_data.get("location", ""), row_data.get("access_node", ""),
+                 row_data.get("create_time", ""), raw, now_str()),
+            )
+            imported += 1
+
+        log_operation(conn, "数据导入", "admin", str(request.url),
+                      f"导入IP主体数据{imported}条" + (f"，错误{len(errors)}条" if errors else ""),
+                      get_client_ip(request))
+
+    result = {
+        "imported": imported,
+        "errors": errors[:20],
+        "error_count": len(errors),
+        "message": f"成功导入 {imported} 条数据" + (f"，{len(errors)}条数据格式错误已跳过" if errors else "")
+    }
+    return result
+
+
+@app.delete("/api/subjects")
+def clear_all_subjects(request: Request, confirm: str = ""):
+    """清空所有IP主体数据（需要confirm=yes参数）。"""
+    if confirm != "yes":
+        raise HTTPException(400, "请确认清空操作（参数confirm=yes）")
+    with get_conn() as conn:
+        count = conn.execute("SELECT COUNT(*) as c FROM ip_subjects").fetchone()["c"]
+        conn.execute("DELETE FROM ip_subjects")
+        log_operation(conn, "数据清空", "admin", str(request.url), f"清空IP主体数据{count}条", get_client_ip(request))
+        return {"deleted": count, "message": f"已清空 {count} 条IP主体数据"}
+
+
 # ============ Export endpoints ============
 def _xlsx_response(wb, filename):
     buf = io.BytesIO()

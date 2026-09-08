@@ -284,7 +284,13 @@
                         <template #header>
                             <div style="display:flex;justify-content:space-between;align-items:center">
                                 <span>数据源管理</span>
-                                <el-button type="primary" @click="openDataSourceDialog()">新增数据源</el-button>
+                                <div>
+                                    <el-button type="success" @click="downloadSubjectTemplate">下载导入模板</el-button>
+                                    <el-upload :show-file-list="false" :before-upload="handleSubjectImport" accept=".xlsx">
+                                        <el-button type="warning">导入IP主体数据</el-button>
+                                    </el-upload>
+                                    <el-button type="primary" @click="openDataSourceDialog()">新增数据源</el-button>
+                                </div>
                             </div>
                         </template>
                         <el-form :inline="true" :model="dsQuery">

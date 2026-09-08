@@ -211,7 +211,7 @@ bash test_system.sh
 
 #### 3.3.1 数据源管理
 
-管理IP主体数据的来源数据源，支持CRUD全流程。
+管理IP主体数据的来源数据源，支持CRUD全流程。同时在数据源管理页面提供 **IP主体数据导入** 功能。
 
 **数据源字段**：
 
@@ -233,6 +233,52 @@ bash test_system.sh
 - 修改：`PUT /api/datasources/{id}`
 - 删除：`DELETE /api/datasources/{id}`
 - 详情：`GET /api/datasources/{id}`
+
+##### IP主体数据导入
+
+由于测试环境无法对接第三方数据源（AAA、BRAS、专线资源系统等），系统支持通过 **Excel文件导入** IP主体数据。导入的数据即查询任务检索的数据源 — 导入什么数据，查询时就返回什么数据。
+
+**操作步骤**：
+1. 在左侧菜单选择「数据与路径管理 → 数据源管理」
+2. 点击右上角 **「下载导入模板」** 按钮，获取标准Excel模板
+3. 按模板格式填写IP主体数据（可参考模板中的示例行）
+4. 点击 **「导入IP主体数据」** 按钮，选择填写好的xlsx文件上传
+5. 系统自动解析并导入数据，返回成功导入条数和错误明细
+
+**导入模板字段**：
+
+| 列名 | 数据库字段 | 必填 | 说明 |
+|------|-----------|------|------|
+| IP地址 | ip_address | 是 | IPv4或IPv6地址 |
+| IP版本 | ip_version | 否 | 留空自动识别（含`:`为IPv6） |
+| 场景类型 | scene_type | 否 | 移网/家宽/专线/IDC/自有业务 |
+| 端口 | port | 否 | 端口号 |
+| 开始时间 | start_time | 否 | 格式：2026-01-01 00:00:00 |
+| 结束时间 | end_time | 否 | 格式：2026-01-01 23:59:59 |
+| 用户名 | user_name | 否 | 会自动脱敏存储 |
+| 用户ID | user_id | 否 | 用户标识 |
+| 电话 | phone | 否 | 会自动脱敏存储 |
+| 地址 | address | 否 | 会自动脱敏存储 |
+| 单位名称 | unit_name | 否 | 会自动脱敏存储 |
+| 身份证号 | id_card | 否 | 前6后4中间脱敏 |
+| 带宽 | bandwidth | 否 | 如100M、500M |
+| IP类型 | ip_type | 否 | 动态/静态 |
+| 数据源 | data_source | 否 | 数据来源名称 |
+| 位置 | location | 否 | 如"安徽合肥-蜀山" |
+| 接入节点 | access_node | 否 | 如SGSN-001 |
+| 开户时间 | create_time | 否 | 格式：2026-01-01 08:00:00 |
+
+**导入规则**：
+- 导入模式为 **追加**，不会删除已有数据
+- IP地址格式会自动校验，不合法的行会跳过并报告错误
+- 敏感字段（用户名、电话、地址、单位名称、身份证号）会自动脱敏后存储，明文保存在对应的 `_plain` 字段中
+- 通过敏感信息审批流程可查看明文
+- 如需清空旧数据，可调用 `DELETE /api/subjects?confirm=yes`
+
+**API**:
+- 下载模板：`GET /api/subjects/import/template`
+- 导入数据：`POST /api/subjects/import`（multipart/form-data，字段名file）
+- 清空数据：`DELETE /api/subjects?confirm=yes`
 
 #### 3.3.2 主体信息管理（模板管理）
 
@@ -458,6 +504,9 @@ bash test_system.sh
 | PUT | `/api/datasources/{id}` | 修改数据源 |
 | DELETE | `/api/datasources/{id}` | 删除数据源 |
 | GET | `/api/datasources/{id}` | 数据源详情 |
+| GET | `/api/subjects/import/template` | 下载IP主体数据导入模板 |
+| POST | `/api/subjects/import` | 导入IP主体数据（Excel上传） |
+| DELETE | `/api/subjects?confirm=yes` | 清空所有IP主体数据 |
 | GET | `/api/templates` | 模板列表 |
 | POST | `/api/templates` | 新增模板 |
 | GET | `/api/templates/{id}` | 模板详情 |

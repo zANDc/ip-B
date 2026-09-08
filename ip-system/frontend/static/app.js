@@ -217,6 +217,38 @@ const app = createApp({
         const dsDetail = ref(null);
         const viewDataSource = async (row) => { dsDetail.value = row; showDsDetailDialog.value = true; };
 
+        // IP主体数据导入
+        const downloadSubjectTemplate = async () => {
+            try {
+                const resp = await fetch('/api/subjects/import/template', { headers: { Authorization: token.value } });
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'IP主体数据导入模板.xlsx'; a.click();
+                URL.revokeObjectURL(url);
+                ElMessage.success('模板下载成功');
+            } catch(e) { ElMessage.error('下载失败: ' + e.message); }
+        };
+        const handleSubjectImport = async (file) => {
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                const resp = await fetch('/api/subjects/import', {
+                    method: 'POST', headers: { Authorization: token.value }, body: formData
+                });
+                const res = await resp.json();
+                if (res.imported > 0) {
+                    ElMessage.success(res.message);
+                    if (res.errors && res.errors.length > 0) {
+                        ElMessageBox.alert(res.errors.join('\n'), '部分数据导入失败', { type: 'warning' });
+                    }
+                } else {
+                    ElMessage.error('未导入任何数据，请检查文件格式');
+                }
+            } catch(e) { ElMessage.error('导入失败: ' + (e.message || '服务器错误')); }
+            return false;
+        };
+
         // Templates
         const templateList = ref([]);
         const tplPage = ref(1);
@@ -499,7 +531,7 @@ const app = createApp({
             taskQuery, taskList, taskPage, taskTotal, loadTasks, resetTaskQuery,
             showTaskResultDialog, showTaskPathDialog, taskDetail, viewTaskResult, viewTaskPath, viewTaskDetail,
             batchResult, downloadTemplate, beforeBatchUpload, handleBatchUpload, viewBatchTask,
-            dsQuery, dsList, dsPage, dsTotal, loadDataSources, resetDsQuery, showDsDialog, dsForm, openDataSourceDialog, saveDataSource, deleteDataSource, showDsDetailDialog, dsDetail, viewDataSource,
+            dsQuery, dsList, dsPage, dsTotal, loadDataSources, resetDsQuery, showDsDialog, dsForm, openDataSourceDialog, saveDataSource, deleteDataSource, showDsDetailDialog, dsDetail, viewDataSource, downloadSubjectTemplate, handleSubjectImport,
             templateList, tplPage, tplTotal, loadTemplates, showTemplateDialog, templateForm, openTemplateDialog, saveTemplate, deleteTemplate, showTemplateDetailDialog, templateDetail, viewTemplate,
             showFieldDialog, fieldList, currentTplId, fieldForm, openFieldDialog, resetFieldForm, openEditField, saveField, deleteField,
             sceneList, scenePage, sceneTotal, loadScenes, showSceneDialog, sceneForm, openSceneDialog, saveScene, deleteScene, toggleScene,
