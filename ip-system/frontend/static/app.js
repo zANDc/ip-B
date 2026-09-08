@@ -38,7 +38,7 @@ const app = createApp({
         const menuTitles = {
             'dashboard': '系统首页', 'query-create': 'IP主体信息查询', 'query-list': '任务列表查询', 'query-batch': '批量导入查询',
             'datasource': '数据源管理', 'template': '主体信息管理', 'scene': '场景路径管理',
-            'conflict': '冲突工单检测', 'assessment': '置信度评估', 'log': '日志管理', 'security': '安全配置'
+            'conflict': '冲突工单检测', 'log': '日志管理', 'security': '安全配置'
         };
         const pageTitle = computed(() => menuTitles[activeMenu.value] || '');
         const handleMenuSelect = (key) => {
@@ -50,7 +50,6 @@ const app = createApp({
             if (key === 'template') loadTemplates(1);
             if (key === 'scene') loadScenes(1);
             if (key === 'conflict') loadConflicts(1);
-            if (key === 'assessment') { loadDimensions(); loadDeductions(); loadAssessmentRecords(1); }
             if (key === 'log') loadLogs(1);
             if (key === 'security') loadSecurityConfig();
         };
@@ -61,7 +60,7 @@ const app = createApp({
             { title: '查询任务', value: stats.value.task_count || 0, icon: 'Search', color: '#409EFF' },
             { title: '数据源', value: stats.value.datasource_count || 0, icon: 'Coin', color: '#67C23A' },
             { title: '待处理工单', value: stats.value.conflict_open || 0, icon: 'Warning', color: '#E6A23C' },
-            { title: '评估记录', value: stats.value.assessment_count || 0, icon: 'DataAnalysis', color: '#F56C6C' },
+            { title: 'IP主体数据', value: stats.value.ip_subject_count || 0, icon: 'DataAnalysis', color: '#F56C6C' },
         ]);
         const loadDashboard = async () => {
             try { stats.value = await API('/api/dashboard/stats'); } catch(e) { console.error(e); }
@@ -431,52 +430,6 @@ const app = createApp({
             try { await API('/api/conflicts/' + processForm.ticket_id + '/process', { method: 'PUT', body: processForm }); ElMessage.success('处理成功'); showProcessDialog.value = false; loadConflicts(conflictPage.value); } catch(e) { ElMessage.error(e.message); }
         };
 
-        // Assessment
-        const assessmentTab = ref('rules');
-        const dimensionList = ref([]);
-        const deductionList = ref([]);
-        const loadDimensions = async () => { try { const res = await API('/api/assessment/dimensions'); dimensionList.value = res.data; } catch(e) {} };
-        const loadDeductions = async () => { try { const res = await API('/api/assessment/deductions'); deductionList.value = res.data; } catch(e) {} };
-        const showDimensionDialog = ref(false);
-        const dimensionForm = reactive({ id: '', name: '', description: '', weight: 1.0, max_score: 100, color_levels: '[]' });
-        const openDimensionDialog = (row) => { if (row) { Object.assign(dimensionForm, row); } else { Object.assign(dimensionForm, { id: '', name: '', description: '', weight: 1.0, max_score: 100, color_levels: '[]' }); } showDimensionDialog.value = true; };
-        const saveDimension = async () => {
-            try {
-                if (dimensionForm.id) { await API('/api/assessment/dimensions/' + dimensionForm.id, { method: 'PUT', body: dimensionForm }); }
-                else { await API('/api/assessment/dimensions', { method: 'POST', body: dimensionForm }); }
-                ElMessage.success('保存成功'); showDimensionDialog.value = false; loadDimensions();
-            } catch(e) { ElMessage.error(e.message); }
-        };
-        const deleteDimension = async (row) => { try { await API('/api/assessment/dimensions/' + row.id, { method: 'DELETE' }); ElMessage.success('删除成功'); loadDimensions(); } catch(e) {} };
-        const showDeductionDialog = ref(false);
-        const deductionForm = reactive({ id: '', name: '', description: '', deduction_value: 10, risk_level: '可疑' });
-        const openDeductionDialog = (row) => { if (row) { Object.assign(deductionForm, row); } else { Object.assign(deductionForm, { id: '', name: '', description: '', deduction_value: 10, risk_level: '可疑' }); } showDeductionDialog.value = true; };
-        const saveDeduction = async () => {
-            try {
-                if (deductionForm.id) { await API('/api/assessment/deductions/' + deductionForm.id, { method: 'PUT', body: deductionForm }); }
-                else { await API('/api/assessment/deductions', { method: 'POST', body: deductionForm }); }
-                ElMessage.success('保存成功'); showDeductionDialog.value = false; loadDeductions();
-            } catch(e) { ElMessage.error(e.message); }
-        };
-        const deleteDeduction = async (row) => { try { await API('/api/assessment/deductions/' + row.id, { method: 'DELETE' }); ElMessage.success('删除成功'); loadDeductions(); } catch(e) {} };
-        // Assessment Records
-        const assessmentQuery = reactive({ ip_address: '', data_source: '', source_field: '', risk_level: '' });
-        const assessmentRecords = ref([]);
-        const assessmentPage = ref(1);
-        const assessmentTotal = ref(0);
-        const loadAssessmentRecords = async (page) => {
-            assessmentPage.value = page;
-            const params = new URLSearchParams({ page, page_size: 10, ...Object.fromEntries(Object.entries(assessmentQuery).filter(([_,v]) => v)) });
-            try { const res = await API('/api/assessment/records?' + params); assessmentRecords.value = res.data; assessmentTotal.value = res.total; } catch(e) { ElMessage.error(e.message); }
-        };
-        const resetAssessmentQuery = () => { Object.keys(assessmentQuery).forEach(k => assessmentQuery[k] = ''); loadAssessmentRecords(1); };
-        const showAssessmentDetailDialog = ref(false);
-        const assessmentDetailData = ref(null);
-        const assessmentDetailScores = ref([]);
-        const viewAssessmentDetail = async (row) => {
-            try { assessmentDetailData.value = await API('/api/assessment/records/' + row.id); assessmentDetailScores.value = Object.entries(assessmentDetailData.value.dimension_scores).map(([k,v]) => ({ name: k, score: v })); showAssessmentDetailDialog.value = true; } catch(e) { ElMessage.error(e.message); }
-        };
-
         // Logs
         const logQuery = reactive({ operation_type: '', operation_detail: '', operator: '', start_time: '', end_time: '' });
         const logList = ref([]);
@@ -537,8 +490,6 @@ const app = createApp({
             sceneList, scenePage, sceneTotal, loadScenes, showSceneDialog, sceneForm, openSceneDialog, saveScene, deleteScene, toggleScene,
             showPathBuilder, pathNodes, pathEdges, selectedNode, currentSceneId, currentPathInfo, openPathBuilder, addNode, clearCanvas, selectNode, deleteNode, getNodePos, savePath, publishPath, handleCanvasRightClick,
             conflictQuery, conflictList, conflictPage, conflictTotal, loadConflicts, resetConflictQuery, showConflictDetailDialog, conflictDetail, conflictLifecycle, viewConflictDetail, showProcessDialog, processForm, processConflict, submitProcessConflict,
-            assessmentTab, dimensionList, deductionList, loadDimensions, loadDeductions, showDimensionDialog, dimensionForm, openDimensionDialog, saveDimension, deleteDimension, showDeductionDialog, deductionForm, openDeductionDialog, saveDeduction, deleteDeduction,
-            assessmentQuery, assessmentRecords, assessmentPage, assessmentTotal, loadAssessmentRecords, resetAssessmentQuery, showAssessmentDetailDialog, assessmentDetailData, assessmentDetailScores, viewAssessmentDetail,
             logQuery, logList, logPage, logTotal, loadLogs, resetLogQuery,
             securityTab, securityConfig, loadSecurityConfig, saveSecurityConfig, ipAccessList, loadIpAccess, showIpAccessDialog, ipAccessForm, openIpAccessDialog, saveIpAccess, toggleIpAccess, deleteIpAccess,
         };

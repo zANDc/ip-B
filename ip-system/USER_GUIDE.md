@@ -2,7 +2,7 @@
 
 ## 一、系统概述
 
-本系统是安徽移动IP主体信息定位平台，基于 **FastAPI + Vue3 + Element Plus + SQLite** 技术栈构建。系统提供IP主体定位查询、数据源管理、主体信息模板管理、场景路径编排、冲突工单全生命周期管理、置信度评估、批量查询与人工修正、敏感信息审批、操作日志、安全配置、用户管理及数据导出等完整功能。
+本系统是安徽移动IP主体信息定位平台，基于 **FastAPI + Vue3 + Element Plus + SQLite** 技术栈构建。系统提供IP主体定位查询、数据源管理、主体信息模板管理、场景路径编排、冲突工单全生命周期管理、批量查询与人工修正、敏感信息审批、操作日志、安全配置、用户管理及数据导出等完整功能。
 
 ### 系统架构
 
@@ -30,7 +30,7 @@ pip install fastapi uvicorn[standard] openpyxl python-multipart pydantic
 python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-服务启动后会自动初始化数据库并导入演示数据（用户、数据源、模板、场景、IP主体样本、评估记录、冲突工单等）。
+服务启动后会自动初始化数据库并导入演示数据（用户、数据源、模板、场景、IP主体样本、冲突工单等）。
 
 ### 方式二：一键部署脚本
 
@@ -86,8 +86,7 @@ bash test_system.sh
 │   ├── 主体信息管理
 │   └── 场景路径管理
 ├── 数据校验
-│   ├── 冲突工单检测
-│   └── 置信度评估
+│   └── 冲突工单检测
 └── 系统管理
     ├── 日志管理
     └── 安全配置
@@ -103,7 +102,6 @@ bash test_system.sh
 | 数据源数 | 已配置的数据源总数 |
 | 冲突工单(未处理) | 状态为open的冲突工单数 |
 | 冲突工单(总数) | 所有冲突工单总数 |
-| 评估记录数 | 置信度评估台账记录数 |
 | IP主体数 | IP主体信息数据条数 |
 | 场景数 | 已配置的场景数 |
 | 模板数 | 主体信息模板数 |
@@ -370,35 +368,6 @@ bash test_system.sh
 - 工单生命周期：`GET /api/conflicts/{id}/lifecycle`
 - 处理工单：`PUT /api/conflicts/{id}/process`
 
-#### 3.4.2 置信度评估
-
-对IP主体信息进行置信度评估，支持加权评分和扣分机制。
-
-**评估维度**（加权计算）：
-
-| 维度 | 权重 | 说明 |
-|------|------|------|
-| 数据时效性 | 0.30 | 数据更新及时程度 |
-| 数据完整性 | 0.30 | 字段完整程度 |
-| 数据准确性 | 0.25 | 与权威源一致程度 |
-| 数据一致性 | 0.15 | 多源数据一致程度 |
-
-**风险扣分项**：
-
-| 扣分项 | 扣分值 | 风险等级 |
-|--------|--------|----------|
-| 高风险数据扣分 | 20 | 高风险 |
-| 疑似异常IP扣分 | 10 | 可疑 |
-| 字段缺失扣分 | 5 | 可疑 |
-
-**风险等级判定**：总分≥90为优秀，≥70为良好，≥50为一般，<50为差。
-
-**API**:
-- 维度管理：`GET/POST/PUT/DELETE /api/assessment/dimensions`
-- 扣分项管理：`GET/POST/PUT/DELETE /api/assessment/deductions`
-- 评估记录：`GET/POST /api/assessment/records`
-- 记录详情：`GET /api/assessment/records/{id}`
-
 ---
 
 ### 3.5 系统管理
@@ -409,7 +378,7 @@ bash test_system.sh
 
 **筛选条件**：操作类型、操作内容、操作人、时间范围
 
-**记录的操作类型**：登录、查询、下载、批量导入、人工修正、审批申请、敏感信息查看、新增、编辑、删除、导出、工单处理、用户管理、安全配置、IP访问授权、置信度评估等。
+**记录的操作类型**：登录、查询、下载、批量导入、人工修正、审批申请、敏感信息查看、新增、编辑、删除、导出、工单处理、用户管理、安全配置、IP访问授权等。
 
 **API**: `GET /api/logs?page=1&page_size=10`
 
@@ -466,7 +435,6 @@ bash test_system.sh
 | IP主体信息 | `GET /api/export/subjects` | ip_address, scene_type |
 | 冲突工单 | `GET /api/export/conflicts` | status, ip_address |
 | 操作日志 | `GET /api/export/logs` | start_time, end_time |
-| 评估记录 | `GET /api/export/assessment` | ip_address |
 
 导出文件格式为 `.xlsx`，包含表头样式和列宽设置。
 
@@ -535,17 +503,6 @@ bash test_system.sh
 | GET | `/api/conflicts/{id}` | 工单详情 |
 | GET | `/api/conflicts/{id}/lifecycle` | 工单生命周期 |
 | PUT | `/api/conflicts/{id}/process` | 处理工单 |
-| GET | `/api/assessment/dimensions` | 评估维度列表 |
-| POST | `/api/assessment/dimensions` | 新增评估维度 |
-| PUT | `/api/assessment/dimensions/{id}` | 修改评估维度 |
-| DELETE | `/api/assessment/dimensions/{id}` | 删除评估维度 |
-| GET | `/api/assessment/deductions` | 扣分项列表 |
-| POST | `/api/assessment/deductions` | 新增扣分项 |
-| PUT | `/api/assessment/deductions/{id}` | 修改扣分项 |
-| DELETE | `/api/assessment/deductions/{id}` | 删除扣分项 |
-| GET | `/api/assessment/records` | 评估记录列表 |
-| POST | `/api/assessment/records` | 新增评估记录 |
-| GET | `/api/assessment/records/{id}` | 评估记录详情 |
 
 ### 系统管理
 
@@ -571,7 +528,6 @@ bash test_system.sh
 | GET | `/api/export/subjects` | 导出IP主体信息 |
 | GET | `/api/export/conflicts` | 导出冲突工单 |
 | GET | `/api/export/logs` | 导出操作日志 |
-| GET | `/api/export/assessment` | 导出评估记录 |
 
 ### 前端
 

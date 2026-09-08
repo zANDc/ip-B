@@ -209,43 +209,6 @@ CREATE TABLE IF NOT EXISTS conflict_tickets (
     lifecycle TEXT             -- 生命周期JSON
 );
 
--- 置信度评估规则(维度)表
-CREATE TABLE IF NOT EXISTS assessment_dimensions (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    weight REAL DEFAULT 1.0,   -- 加权系数
-    max_score REAL DEFAULT 100,
-    color_levels TEXT,         -- 分级标尺 JSON [{level, color, range}]
-    created_at TEXT,
-    updated_at TEXT
-);
-
--- 置信度评估风险扣分项表
-CREATE TABLE IF NOT EXISTS assessment_deductions (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    deduction_value REAL,     -- 扣分值
-    risk_level TEXT,          -- 可疑/高风险
-    created_at TEXT
-);
-
--- 置信度评估台账记录表
-CREATE TABLE IF NOT EXISTS assessment_records (
-    id TEXT PRIMARY KEY,
-    access_id TEXT,           -- 访问标识
-    ip_address TEXT,
-    data_source TEXT,
-    source_field TEXT,
-    assessment_time TEXT,
-    total_score REAL,         -- 综合总分
-    dimension_scores TEXT,    -- 各维度分项得分 JSON
-    deductions TEXT,          -- 扣分项 JSON
-    risk_level TEXT,
-    created_at TEXT
-);
-
 -- 审批表(查看敏感信息)
 CREATE TABLE IF NOT EXISTS approvals (
     id TEXT PRIMARY KEY,
@@ -472,49 +435,6 @@ def seed_data():
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (gen_id("ip_"), s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12],
                  s[13], s[13], id_masked, id_plain, s[15], s[16], s[17], None, s[18], s[19], s[20], raw, now_str()),
-            )
-
-        # Assessment dimensions
-        dims = [
-            ("数据时效性", "评估数据的更新及时程度", 0.3, 100, json.dumps([{"level":"优秀","color":"#67c23a","range":"90-100"},{"level":"良好","color":"#409eff","range":"70-89"},{"level":"一般","color":"#e6a23c","range":"50-69"},{"level":"差","color":"#f56c6c","range":"0-49"}])),
-            ("数据完整性", "评估数据字段的完整程度", 0.3, 100, json.dumps([{"level":"优秀","color":"#67c23a","range":"90-100"},{"level":"良好","color":"#409eff","range":"70-89"},{"level":"一般","color":"#e6a23c","range":"50-69"},{"level":"差","color":"#f56c6c","range":"0-49"}])),
-            ("数据准确性", "评估数据与权威源的一致程度", 0.25, 100, json.dumps([{"level":"优秀","color":"#67c23a","range":"90-100"},{"level":"良好","color":"#409eff","range":"70-89"},{"level":"一般","color":"#e6a23c","range":"50-69"},{"level":"差","color":"#f56c6c","range":"0-49"}])),
-            ("数据一致性", "评估多源数据的字段一致程度", 0.15, 100, json.dumps([{"level":"优秀","color":"#67c23a","range":"90-100"},{"level":"良好","color":"#409eff","range":"70-89"},{"level":"一般","color":"#e6a23c","range":"50-69"},{"level":"差","color":"#f56c6c","range":"0-49"}])),
-        ]
-        for d in dims:
-            conn.execute(
-                "INSERT INTO assessment_dimensions (id, name, description, weight, max_score, color_levels, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
-                (gen_id("dim_"), *d, now_str(), now_str()),
-            )
-
-        # Deductions
-        deductions = [
-            ("疑似异常IP扣分", "IP地址存在疑似异常活动记录", 10.0, "可疑"),
-            ("高风险数据扣分", "数据来源于不可信渠道或历史存在问题", 20.0, "高风险"),
-            ("字段缺失扣分", "关键字段存在缺失情况", 5.0, "可疑"),
-        ]
-        for d in deductions:
-            conn.execute(
-                "INSERT INTO assessment_deductions (id, name, description, deduction_value, risk_level, created_at) VALUES (?,?,?,?,?,?)",
-                (gen_id("ded_"), *d, now_str()),
-            )
-
-        # Assessment records (sample)
-        rec = [
-            ("ACC001", "10.0.1.100", "移网AAA数据源", "user_name", 88.5,
-             json.dumps({"数据时效性": 90, "数据完整性": 85, "数据准确性": 92, "数据一致性": 87}),
-             json.dumps([{"name": "字段缺失扣分", "value": 5}]), "良好"),
-            ("ACC002", "192.168.1.100", "家宽BRAS数据源", "phone", 78.0,
-             json.dumps({"数据时效性": 80, "数据完整性": 75, "数据准确性": 82, "数据一致性": 78}),
-             json.dumps([]), "良好"),
-            ("ACC003", "172.16.1.100", "专线资源系统", "unit_name", 65.0,
-             json.dumps({"数据时效性": 60, "数据完整性": 70, "数据准确性": 65, "数据一致性": 68}),
-             json.dumps([{"name": "疑似异常IP扣分", "value": 10}]), "一般"),
-        ]
-        for r in rec:
-            conn.execute(
-                "INSERT INTO assessment_records (id, access_id, ip_address, data_source, source_field, assessment_time, total_score, dimension_scores, deductions, risk_level, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (gen_id("ar_"), r[0], r[1], r[2], r[3], now_str(), r[4], r[5], r[6], r[7], now_str()),
             )
 
         # Conflict tickets (sample)

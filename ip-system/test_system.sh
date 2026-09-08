@@ -126,23 +126,11 @@ if [ -n "$CT_ID" ]; then
     if echo "$RESP" | grep -q "status\|lifecycle\|message"; then log_pass "6.5 处理工单"; else log_fail "6.5 处理工单"; fi
 fi
 
-# ============ 7. 置信度评估 ============
+# ============ 7. 批量查询与人工修正 ============
 echo ""
-echo ">>> 7. 置信度评估"
-RESP=$(auth_req GET "/api/assessment/dimensions")
-if echo "$RESP" | grep -q "id\|\["; then log_pass "7.1 评估维度列表"; else log_fail "7.1 评估维度列表"; fi
-
-RESP=$(auth_req GET "/api/assessment/deductions")
-if echo "$RESP" | grep -q "id\|\["; then log_pass "7.2 扣分规则列表"; else log_fail "7.2 扣分规则列表"; fi
-
-RESP=$(auth_req GET "/api/assessment/records")
-if echo "$RESP" | grep -q "id\|\["; then log_pass "7.3 评估记录列表"; else log_fail "7.3 评估记录列表"; fi
-
-# ============ 8. 批量查询与人工修正 ============
-echo ""
-echo ">>> 8. 批量查询与人工修正"
+echo ">>> 7. 批量查询与人工修正"
 CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/query/batch/template" -H "Authorization: $TOKEN")
-if [ "$CODE" = "200" ]; then log_pass "8.1 下载批量查询模板"; else log_fail "8.1 下载批量查询模板 code=$CODE"; fi
+if [ "$CODE" = "200" ]; then log_pass "7.1 下载批量查询模板"; else log_fail "7.1 下载批量查询模板 code=$CODE"; fi
 
 python3 -c "
 from openpyxl import Workbook
@@ -153,69 +141,66 @@ ws.append([1,'10.0.0.99','IPv4','','2025-01-01 00:00:00','2025-12-31 23:59:59','
 wb.save('/tmp/test_batch.xlsx')
 "
 RESP=$(curl -s -X POST "$BASE/api/query/batch/import" -H "Authorization: $TOKEN" -F "file=@/tmp/test_batch.xlsx")
-if echo "$RESP" | grep -q "batch_id\|total"; then log_pass "8.2 批量导入查询"; else log_fail "8.2 批量导入查询"; fi
+if echo "$RESP" | grep -q "batch_id\|total"; then log_pass "7.2 批量导入查询"; else log_fail "7.2 批量导入查询"; fi
 
 RESP=$(auth_req POST "/api/query/manual-fix" '{"ip_address":"192.168.1.100","field_name":"user_name","field_value":"测试用户","reason":"数据错误"}')
-if echo "$RESP" | grep -q "ticket_no\|success"; then log_pass "8.3 人工修正"; else log_fail "8.3 人工修正"; fi
+if echo "$RESP" | grep -q "ticket_no\|success"; then log_pass "7.3 人工修正"; else log_fail "7.3 人工修正"; fi
 
 RESP=$(auth_req POST "/api/query/approval/request" '{"target_ip":"192.168.1.100","target_field":"phone","approver":"admin","applicant":"admin"}')
-if echo "$RESP" | grep -q "id\|approval\|success\|message"; then log_pass "8.4 敏感信息审批申请"; else log_fail "8.4 敏感信息审批申请"; fi
+if echo "$RESP" | grep -q "id\|approval\|success\|message"; then log_pass "7.4 敏感信息审批申请"; else log_fail "7.4 敏感信息审批申请"; fi
 
-# ============ 9. 日志管理 ============
+# ============ 8. 日志管理 ============
 echo ""
-echo ">>> 9. 日志管理"
+echo ">>> 8. 日志管理"
 RESP=$(auth_req GET "/api/logs")
-if echo "$RESP" | grep -q "id\|\["; then log_pass "9.1 操作日志列表"; else log_fail "9.1 操作日志列表"; fi
+if echo "$RESP" | grep -q "id\|\["; then log_pass "8.1 操作日志列表"; else log_fail "8.1 操作日志列表"; fi
 
-# ============ 10. 安全配置 ============
+# ============ 9. 安全配置 ============
 echo ""
-echo ">>> 10. 安全配置"
+echo ">>> 9. 安全配置"
 RESP=$(auth_req GET "/api/security/config")
-if echo "$RESP" | grep -q "data\|config"; then log_pass "10.1 安全配置查询"; else log_fail "10.1 安全配置查询"; fi
+if echo "$RESP" | grep -q "data\|config"; then log_pass "9.1 安全配置查询"; else log_fail "9.1 安全配置查询"; fi
 
 RESP=$(auth_req PUT "/api/security/config" '{"config_key":"password_min_length","config_value":"8"}')
-if echo "$RESP" | grep -q "message\|success"; then log_pass "10.2 修改安全配置"; else log_fail "10.2 修改安全配置"; fi
+if echo "$RESP" | grep -q "message\|success"; then log_pass "9.2 修改安全配置"; else log_fail "9.2 修改安全配置"; fi
 
 RESP=$(auth_req GET "/api/security/ip-access")
-if echo "$RESP" | grep -q "data\|default"; then log_pass "10.3 IP访问规则列表"; else log_fail "10.3 IP访问规则列表"; fi
+if echo "$RESP" | grep -q "data\|default"; then log_pass "9.3 IP访问规则列表"; else log_fail "9.3 IP访问规则列表"; fi
 
 RESP=$(auth_req POST "/api/security/ip-access" '{"ip_segment":"192.168.1.0/24","description":"测试网段"}')
-if echo "$RESP" | grep -q "id\|message"; then log_pass "10.4 新增IP访问规则"; else log_fail "10.4 新增IP访问规则"; fi
+if echo "$RESP" | grep -q "id\|message"; then log_pass "9.4 新增IP访问规则"; else log_fail "9.4 新增IP访问规则"; fi
 
-# ============ 11. 用户管理 ============
+# ============ 10. 用户管理 ============
 echo ""
-echo ">>> 11. 用户管理"
+echo ">>> 10. 用户管理"
 RESP=$(auth_req GET "/api/users")
-if echo "$RESP" | grep -q "id\|username"; then log_pass "11.1 用户列表"; else log_fail "11.1 用户列表"; fi
+if echo "$RESP" | grep -q "id\|username"; then log_pass "10.1 用户列表"; else log_fail "10.1 用户列表"; fi
 
-# ============ 12. 仪表盘 ============
+# ============ 11. 仪表盘 ============
 echo ""
-echo ">>> 12. 仪表盘统计"
+echo ">>> 11. 仪表盘统计"
 RESP=$(auth_req GET "/api/dashboard/stats")
-if echo "$RESP" | grep -q "task_count\|datasource_count"; then log_pass "12.1 仪表盘统计"; else log_fail "12.1 仪表盘统计"; fi
+if echo "$RESP" | grep -q "task_count\|datasource_count"; then log_pass "11.1 仪表盘统计"; else log_fail "11.1 仪表盘统计"; fi
 
-# ============ 13. 导出功能 ============
+# ============ 12. 导出功能 ============
 echo ""
-echo ">>> 13. 导出功能"
+echo ">>> 12. 导出功能"
 CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/export/subjects" -H "Authorization: $TOKEN")
-if [ "$CODE" = "200" ]; then log_pass "13.1 导出主体信息"; else log_fail "13.1 导出主体信息 code=$CODE"; fi
+if [ "$CODE" = "200" ]; then log_pass "12.1 导出主体信息"; else log_fail "12.1 导出主体信息 code=$CODE"; fi
 
 CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/export/conflicts" -H "Authorization: $TOKEN")
-if [ "$CODE" = "200" ]; then log_pass "13.2 导出冲突工单"; else log_fail "13.2 导出冲突工单 code=$CODE"; fi
+if [ "$CODE" = "200" ]; then log_pass "12.2 导出冲突工单"; else log_fail "12.2 导出冲突工单 code=$CODE"; fi
 
 CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/export/logs" -H "Authorization: $TOKEN")
-if [ "$CODE" = "200" ]; then log_pass "13.3 导出操作日志"; else log_fail "13.3 导出操作日志 code=$CODE"; fi
+if [ "$CODE" = "200" ]; then log_pass "12.3 导出操作日志"; else log_fail "12.3 导出操作日志 code=$CODE"; fi
 
-CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/export/assessment" -H "Authorization: $TOKEN")
-if [ "$CODE" = "200" ]; then log_pass "13.4 导出评估记录"; else log_fail "13.4 导出评估记录 code=$CODE"; fi
-
-# ============ 14. 前端页面 ============
+# ============ 13. 前端页面 ============
 echo ""
-echo ">>> 14. 前端页面"
+echo ">>> 13. 前端页面"
 CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/")
-if [ "$CODE" = "200" ]; then log_pass "14.1 首页加载"; else log_fail "14.1 首页加载 code=$CODE"; fi
+if [ "$CODE" = "200" ]; then log_pass "13.1 首页加载"; else log_fail "13.1 首页加载 code=$CODE"; fi
 CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/static/app.js")
-if [ "$CODE" = "200" ]; then log_pass "14.2 静态资源加载"; else log_fail "14.2 静态资源加载 code=$CODE"; fi
+if [ "$CODE" = "200" ]; then log_pass "13.2 静态资源加载"; else log_fail "13.2 静态资源加载 code=$CODE"; fi
 
 # ============ Summary ============
 echo ""
