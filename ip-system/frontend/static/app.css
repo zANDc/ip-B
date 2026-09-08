@@ -46,6 +46,24 @@ body { font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans G
 .node-ds { position: absolute; top: 42px; left: 0; font-size: 11px; color: #67C23A; white-space: nowrap; }
 .node-cond { position: absolute; top: 42px; left: 0; font-size: 11px; color: #E6A23C; white-space: nowrap; }
 
+/* Path replay (read-only diagram of the executed configured scene path) */
+.replay-box { margin-top: 5px; }
+.replay-meta { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
+.replay-canvas { width: 100%; overflow: auto; background: #f5f7fa; background-image: radial-gradient(circle, #dcdfe6 1px, transparent 1px); background-size: 20px 20px; border: 2px dashed #dcdfe6; border-radius: 4px; padding: 6px; }
+.rp-sizer { position: relative; overflow: hidden; }
+.rp-inner { position: relative; transform-origin: 0 0; }
+.rp-svg { position: absolute; top: 0; left: 0; pointer-events: none; }
+.rp-edge { stroke-width: 2; }
+.rp-edge-on { stroke: #409EFF; }
+.rp-edge-off { stroke: #c0c4cc; stroke-dasharray: 4,4; opacity: 0.6; }
+.rp-node-idle { opacity: 0.55; }
+.rp-node-failed { outline: 2px solid #F56C6C; outline-offset: 1px; }
+.rp-status { position: absolute; right: -9px; top: -9px; width: 18px; height: 18px; border-radius: 50%; background: #67C23A; color: #fff; font-size: 12px; line-height: 18px; text-align: center; }
+.rp-node-failed .rp-status { background: #F56C6C; }
+.rp-timeline { margin-top: 15px; }
+.rp-timeline .rp-card h4 { margin: 0 0 4px; display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.rp-timeline .rp-card p { margin: 3px 0; font-size: 13px; color: #606266; }
+
 /* Element Plus overrides */
 .el-menu { border-right: none !important; }
 .el-pagination { justify-content: flex-end; }

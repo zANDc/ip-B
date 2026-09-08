@@ -110,7 +110,7 @@ def execute_scene_path(conn, nodes, edges, ip, req):
     - execute node: query the bound data source (哪类数据去哪个数据源查)
     - judge node: branch by '是否命中' condition label (判断什么后该查哪里)
     Returns (results, records) where records is a list of tuples:
-    (node_name, node_type, status, detail, data_source).
+    (node_id, node_name, node_type, status, detail, data_source).
     """
     results = []
     records = []
@@ -133,7 +133,7 @@ def execute_scene_path(conn, nodes, edges, ip, req):
         nname = current.get("name") or ntype or "节点"
 
         if ntype == "start":
-            records.append((nname, "start", "success", "任务开始", "系统"))
+            records.append((nid, nname, "start", "success", "任务开始", "系统"))
         elif ntype == "execute":
             ds_id = current.get("data_source_id")
             ds_name = None
@@ -149,9 +149,9 @@ def execute_scene_path(conn, nodes, edges, ip, req):
                 rows = conn.execute(sql, params).fetchall()
                 results.extend(rows)
                 target = current.get("query_target") or "IP主体信息"
-                records.append((nname, "execute", "success", f"查询[{target}]于数据源[{ds_name}], 命中{len(rows)}条", ds_name))
+                records.append((nid, nname, "execute", "success", f"查询[{target}]于数据源[{ds_name}], 命中{len(rows)}条", ds_name))
             else:
-                records.append((nname, "execute", "success", f"返回{len(results)}条定位结果", "系统"))
+                records.append((nid, nname, "execute", "success", f"返回{len(results)}条定位结果", "系统"))
         elif ntype == "judge":
             hit = len(results) > 0
             label = "命中" if hit else "未命中"
@@ -160,13 +160,13 @@ def execute_scene_path(conn, nodes, edges, ip, req):
             edge = next((e for e in outs if (e.get("label") or "") == label), None)
             if edge is None:
                 edge = outs[0] if outs else None
-            records.append((nname, "judge", "success", f"判断[{cond}]: {label}, 走[{label}]分支", "系统"))
+            records.append((nid, nname, "judge", "success", f"判断[{cond}]: {label}, 走[{label}]分支", "系统"))
             if edge:
                 current = node_map.get(edge.get("to"))
                 continue
             break
         else:
-            records.append((nname, ntype or "execute", "success", str(current.get("detail") or ""), "系统"))
+            records.append((nid, nname, ntype or "execute", "success", str(current.get("detail") or ""), "系统"))
 
         # non-judge node: follow first outgoing edge
         outs = edges_from.get(nid, [])
@@ -182,13 +182,14 @@ def query_ip_results(conn, ip, start_time, end_time, scene_type=None):
 
     Flow: scene detection -> published path execution -> fallback scene-wide query.
     All results come from the ip_subjects table (real database rows), no mocked data.
-    Returns (results, records, scene_type, path_name)."""
+    Returns (results, records, scene_type, path_snapshot) where path_snapshot is the
+    executed configured scene path {name, nodes, edges} (replay == configured path)."""
     from types import SimpleNamespace
     if not scene_type:
         scene_type = detect_scene_by_ip(conn, ip)
 
     results, records = [], []
-    path_name = None
+    path_snapshot = None
     if scene_type:
         scene = conn.execute("SELECT * FROM scenes WHERE scene_type=? AND status='enabled'", (scene_type,)).fetchone()
         if scene:
@@ -206,10 +207,9 @@ def query_ip_results(conn, ip, start_time, end_time, scene_type=None):
                 except Exception:
                     edges = []
                 if nodes:
-                    path_name = path["name"]
                     req = SimpleNamespace(start_time=start_time, end_time=end_time)
                     results, records = execute_scene_path(conn, nodes, edges, ip, req)
-                    records.insert(0, ("场景识别", "judge", "success", f"场景类型: {scene_type} (路径: {path_name})", "系统"))
+                    path_snapshot = {"name": path["name"], "nodes": nodes, "edges": edges}
 
     # Fallback: no published path -> query all data sources of this scene (with time filter)
     if not records:
@@ -223,14 +223,27 @@ def query_ip_results(conn, ip, start_time, end_time, scene_type=None):
             params += [scene_type]
         results = conn.execute(sql, params).fetchall()
         ds_desc = ",".join(sorted({r["data_source"] for r in results})) if results else "无匹配数据源"
-        records = [
-            ("开始", "start", "success", "任务开始", "系统"),
-            ("场景识别", "judge", "success", f"场景类型: {scene_type or '未识别'} (未配置发布路径, 查询场景全部数据源)", "系统"),
-            ("数据源查询", "execute", "success" if results else "failed", f"查询数据源: {ds_desc}", ds_desc),
-            ("数据融合", "execute", "success" if results else "failed", f"命中{len(results)}条记录", "融合算法"),
-            ("返回结果", "execute", "success", f"返回{len(results)}条定位结果", "系统"),
+        # Synthesize a default linear path so the replay still renders as a path
+        nodes = [
+            {"id": "n_start", "type": "start", "name": "开始", "x": 40, "y": 160},
+            {"id": "n_query", "type": "execute", "name": "数据源查询", "x": 260, "y": 160},
+            {"id": "n_fuse", "type": "execute", "name": "数据融合", "x": 480, "y": 160},
+            {"id": "n_end", "type": "execute", "name": "返回结果", "x": 700, "y": 160},
         ]
-    return results, records, scene_type, path_name
+        edges = [
+            {"from": "n_start", "to": "n_query"},
+            {"from": "n_query", "to": "n_fuse"},
+            {"from": "n_fuse", "to": "n_end"},
+        ]
+        path_snapshot = {"name": "默认流程(未配置发布路径)", "nodes": nodes, "edges": edges}
+        records = [
+            ("n_start", "开始", "start", "success", "任务开始", "系统"),
+            ("n_query", "数据源查询", "execute", "success" if results else "failed",
+             f"未配置发布路径, 查询场景全部数据源: {ds_desc}", ds_desc),
+            ("n_fuse", "数据融合", "execute", "success" if results else "failed", f"命中{len(results)}条记录", "融合算法"),
+            ("n_end", "返回结果", "execute", "success", f"返回{len(results)}条定位结果", "系统"),
+        ]
+    return results, records, scene_type, path_snapshot
 
 
 # ============ Auth (simplified) ============
@@ -278,24 +291,25 @@ def create_query_task(req: QueryTaskRequest, request: Request):
         task_id = gen_id("task_")
 
         # Unified real-data query: scene detection -> published path execution -> fallback
-        results, records, scene_type, path_name = query_ip_results(conn, ip, req.start_time, req.end_time, req.scene_type)
+        results, records, scene_type, path_snapshot = query_ip_results(conn, ip, req.start_time, req.end_time, req.scene_type)
 
-        # Create task
+        # Create task (store the executed configured path snapshot for replay)
         task_name = req.task_name or f"查询-{ip}"
         conn.execute(
-            """INSERT INTO query_tasks (id, task_name, ip_address, ip_version, port, start_time, end_time, scene_type, status, result_count, created_by, created_at, completed_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (task_id, task_name, ip, ip_ver, req.port or "", req.start_time, req.end_time, scene_type or "", "completed", len(results), "admin", now_str(), now_str()),
+            """INSERT INTO query_tasks (id, task_name, ip_address, ip_version, port, start_time, end_time, scene_type, status, result_count, path_snapshot, created_by, created_at, completed_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (task_id, task_name, ip, ip_ver, req.port or "", req.start_time, req.end_time, scene_type or "", "completed", len(results),
+             json.dumps(path_snapshot, ensure_ascii=False) if path_snapshot else None, "admin", now_str(), now_str()),
         )
 
-        # Create path records from actual execution flow
+        # Create path records from actual execution flow (node_id maps to the snapshot node)
         for rec in records:
             conn.execute(
-                "INSERT INTO task_paths (id, task_id, node_name, node_type, status, detail, data_source, started_at, completed_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                (gen_id("tp_"), task_id, rec[0], rec[1], rec[2], rec[3], rec[4], now_str(), now_str()),
+                "INSERT INTO task_paths (id, task_id, node_id, node_name, node_type, status, detail, data_source, started_at, completed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (gen_id("tp_"), task_id, rec[0], rec[1], rec[2], rec[3], rec[4], rec[5], now_str(), now_str()),
             )
 
-        log_operation(conn, "查询", "admin", str(request.url), f"创建IP查询任务: {ip} (场景:{scene_type or '未识别'}, 路径:{path_name or '默认流程'})", get_client_ip(request))
+        log_operation(conn, "查询", "admin", str(request.url), f"创建IP查询任务: {ip} (场景:{scene_type or '未识别'}, 路径:{path_snapshot['name'] if path_snapshot else '默认流程'})", get_client_ip(request))
 
         # Mask sensitive fields in results
         masked_results = []
@@ -307,8 +321,21 @@ def create_query_task(req: QueryTaskRequest, request: Request):
             "task_id": task_id,
             "results": masked_results,
             "count": len(results),
+            "scene_type": scene_type,
+            "path": path_snapshot,
             "paths": parse_list(conn.execute("SELECT * FROM task_paths WHERE task_id=? ORDER BY rowid", (task_id,)).fetchall()),
         }
+
+
+def parse_path_snapshot(task):
+    """Parse the stored path snapshot of a task, if any."""
+    if not task or not task["path_snapshot"]:
+        return None
+    try:
+        snap = json.loads(task["path_snapshot"])
+        return snap if isinstance(snap, dict) else None
+    except Exception:
+        return None
 
 
 # Get task result details
@@ -327,6 +354,7 @@ def get_task_detail(task_id: str, request: Request):
         return {
             "task": dict(task),
             "results": parse_list(results),
+            "path": parse_path_snapshot(task),
             "paths": parse_list(paths),
         }
 
@@ -387,6 +415,7 @@ def get_task_path(task_id: str, request: Request):
         paths = conn.execute("SELECT * FROM task_paths WHERE task_id=? ORDER BY rowid", (task_id,)).fetchall()
         return {
             "task": dict(task),
+            "path": parse_path_snapshot(task),
             "paths": parse_list(paths),
         }
 
@@ -504,16 +533,17 @@ async def batch_import(request: Request, file: UploadFile = File(...)):
             # Create task for each IP using the same unified real-data query
             task_id = gen_id("task_")
             task_name = f"批量查询-{ip}"
-            ip_results, ip_records, eff_scene, _ = query_ip_results(conn, ip, start_time, end_time, scene_type)
+            ip_results, ip_records, eff_scene, ip_snapshot = query_ip_results(conn, ip, start_time, end_time, scene_type)
             conn.execute(
-                """INSERT INTO query_tasks (id, task_name, ip_address, ip_version, port, start_time, end_time, scene_type, status, result_count, created_by, created_at, completed_at, batch_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (task_id, task_name, ip, ip_ver, port, start_time, end_time, eff_scene or "", "completed", len(ip_results), "admin", now_str(), now_str(), batch_id),
+                """INSERT INTO query_tasks (id, task_name, ip_address, ip_version, port, start_time, end_time, scene_type, status, result_count, path_snapshot, created_by, created_at, completed_at, batch_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (task_id, task_name, ip, ip_ver, port, start_time, end_time, eff_scene or "", "completed", len(ip_results),
+                 json.dumps(ip_snapshot, ensure_ascii=False) if ip_snapshot else None, "admin", now_str(), now_str(), batch_id),
             )
             for rec in ip_records:
                 conn.execute(
-                    "INSERT INTO task_paths (id, task_id, node_name, node_type, status, detail, data_source, started_at, completed_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                    (gen_id("tp_"), task_id, rec[0], rec[1], rec[2], rec[3], rec[4], now_str(), now_str()),
+                    "INSERT INTO task_paths (id, task_id, node_id, node_name, node_type, status, detail, data_source, started_at, completed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (gen_id("tp_"), task_id, rec[0], rec[1], rec[2], rec[3], rec[4], rec[5], now_str(), now_str()),
                 )
             results.append({"ip": ip, "task_id": task_id, "count": len(ip_results)})
 

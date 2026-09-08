@@ -659,6 +659,104 @@ const app = createApp({
     }
 });
 
+// Path Replay component: renders the executed configured scene path (read-only diagram)
+// plus per-node detailed execution results. Usage: <path-replay :path=".." :records=".." :fit="900"/>
+app.component('path-replay', {
+    props: {
+        path: { type: Object, default: null },   // {name, nodes, edges} snapshot of the configured path
+        records: { type: Array, default: () => [] }, // task_paths rows (node_id, node_name, node_type, status, detail, data_source...)
+        fit: { type: Number, default: 900 },     // available width for auto-scaling
+    },
+    template: `
+    <div class="replay-box">
+        <div class="replay-meta" v-if="path">
+            <el-tag type="success" effect="dark">执行路径: {{path.name}}</el-tag>
+            <el-tag type="info">节点 {{(path.nodes||[]).length}}</el-tag>
+            <el-tag type="info">连线 {{(path.edges||[]).length}}</el-tag>
+            <el-tag type="warning">未走分支虚线显示</el-tag>
+        </div>
+        <div class="replay-canvas" v-if="path && (path.nodes||[]).length">
+            <div class="rp-sizer" :style="{width: (size.w*scale)+'px', height: (size.h*scale)+'px'}">
+                <div class="pb-inner rp-inner" :style="innerStyle">
+                    <svg class="path-edges rp-svg" :width="size.w" :height="size.h">
+                        <defs>
+                            <marker id="rp-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                                <path d="M0,0 L0,6 L8,3 z" fill="#409EFF"></path>
+                            </marker>
+                        </defs>
+                        <g v-for="(e,idx) in (path.edges||[])" :key="'rp-e'+idx">
+                            <line :x1="anchorPos(e.from).x" :y1="anchorPos(e.from).y"
+                                  :x2="nodePos(e.to).x" :y2="nodePos(e.to).y"
+                                  :class="['rp-edge', isTraversed(e) ? 'rp-edge-on' : 'rp-edge-off']"
+                                  marker-end="url(#rp-arrow)"/>
+                            <text v-if="e.label" :x="(anchorPos(e.from).x+nodePos(e.to).x)/2"
+                                  :y="(anchorPos(e.from).y+nodePos(e.to).y)/2-6"
+                                  fill="#E6A23C" font-size="12" font-weight="bold">{{e.label}}</text>
+                        </g>
+                    </svg>
+                    <div v-for="n in (path.nodes||[])" :key="n.id"
+                         class="path-node rp-node" :class="['node-'+(n.type||'execute'), nodeStatus(n)==='failed' ? 'rp-node-failed' : '', nodeStatus(n) ? '' : 'rp-node-idle']"
+                         :style="{left:(n.x||0)+'px', top:(n.y||0)+'px'}" :title="nodeTitle(n)">
+                        <el-icon><component :is="n.type==='start'?'Flag':n.type==='judge'?'Switch':'Cpu'"/></el-icon>
+                        <span class="pb-node-name">{{n.name}}</span>
+                        <span class="rp-status" v-if="nodeStatus(n)">{{nodeStatus(n)==='failed'?'✗':'✓'}}</span>
+                        <div class="node-ds" v-if="n.data_source_name">{{n.data_source_name}}</div>
+                        <div class="node-cond" v-if="n.condition">{{n.condition}}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <el-timeline class="rp-timeline">
+            <el-timeline-item v-for="(p,idx) in records" :key="'rp-r'+idx"
+                :type="p.status==='success'?'success':'danger'" :timestamp="p.started_at" placement="top">
+                <el-card shadow="never" class="rp-card">
+                    <h4>{{p.node_name}}
+                        <el-tag size="small" :type="p.node_type==='start'?'info':p.node_type==='judge'?'warning':'success'">{{p.node_type}}</el-tag>
+                        <el-tag size="small" :type="p.status==='success'?'success':'danger'">{{p.status}}</el-tag>
+                    </h4>
+                    <p>{{p.detail}}</p>
+                    <p v-if="p.data_source">数据源: {{p.data_source}}</p>
+                </el-card>
+            </el-timeline-item>
+        </el-timeline>
+    </div>`,
+    setup(props) {
+        const { computed } = Vue;
+        const NODE_W = 140, NODE_H = 40;
+        const nodeById = (id) => (props.path && props.path.nodes ? props.path.nodes.find(n => n.id === id) : null) || null;
+        const nodePos = (id) => { const n = nodeById(id); return { x: (n && n.x) || 0, y: ((n && n.y) || 0) + NODE_H / 2 }; };
+        const anchorPos = (id) => { const n = nodeById(id); return { x: ((n && n.x) || 0) + NODE_W, y: ((n && n.y) || 0) + NODE_H / 2 }; };
+        const recordByNode = (id) => (props.records || []).find(p => p.node_id === id) || null;
+        const nodeStatus = (n) => { const r = recordByNode(n.id); return r ? r.status : null; };
+        const nodeTitle = (n) => {
+            const r = recordByNode(n.id);
+            if (r) return (r.detail || r.node_name);
+            return (n.data_source_name ? '数据源: ' + n.data_source_name + ' (未执行)' : (n.condition || n.name) + ' (未执行)');
+        };
+        // edges actually walked = consecutive executed node ids
+        const traversedSet = computed(() => {
+            const s = new Set();
+            const recs = props.records || [];
+            for (let i = 1; i < recs.length; i++) {
+                if (recs[i-1].node_id && recs[i].node_id) s.add(recs[i-1].node_id + '->' + recs[i].node_id);
+            }
+            return s;
+        });
+        const isTraversed = (e) => traversedSet.value.has((e.from || '') + '->' + (e.to || ''));
+        const size = computed(() => {
+            const nodes = (props.path && props.path.nodes) || [];
+            if (!nodes.length) return { w: 800, h: 260 };
+            return {
+                w: Math.max(...nodes.map(n => (n.x || 0) + NODE_W)) + 60,
+                h: Math.max(...nodes.map(n => (n.y || 0) + NODE_H)) + 60,
+            };
+        });
+        const scale = computed(() => Math.max(0.3, Math.min(1, props.fit / size.value.w)));
+        const innerStyle = computed(() => ({ width: size.value.w + 'px', height: size.value.h + 'px', transform: 'scale(' + scale.value + ')', transformOrigin: '0 0' }));
+        return { nodePos, anchorPos, nodeStatus, nodeTitle, isTraversed, size, scale, innerStyle };
+    }
+});
+
 // Register Element Plus and icons
 app.use(ElementPlus);
 for (const [key, comp] of Object.entries(ElementPlusIconsVue)) {

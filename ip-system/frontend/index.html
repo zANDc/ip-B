@@ -193,20 +193,10 @@
                             </el-table-column>
                         </el-table>
 
-                        <!-- Path Replay -->
+                        <!-- Path Replay: the configured scene path actually executed + detailed results -->
                         <div v-if="showPathReplay" style="margin-top:20px">
-                            <el-divider>查询路径回溯</el-divider>
-                            <el-timeline>
-                                <el-timeline-item v-for="(p,idx) in queryResult.paths" :key="idx"
-                                    :type="p.status==='success'?'success':'danger'"
-                                    :timestamp="p.started_at" placement="top">
-                                    <el-card>
-                                        <h4>{{ p.node_name }} <el-tag size="small" :type="p.node_type==='start'?'info':p.node_type==='judge'?'warning':'success'">{{p.node_type}}</el-tag></h4>
-                                        <p>{{ p.detail }}</p>
-                                        <p v-if="p.data_source">数据源: {{ p.data_source }}</p>
-                                    </el-card>
-                                </el-timeline-item>
-                            </el-timeline>
+                            <el-divider>查询路径回溯（配置的场景路径执行详情）</el-divider>
+                            <path-replay :path="queryResult.path" :records="queryResult.paths" :fit="880"></path-replay>
                         </div>
                     </el-card>
                 </div>
@@ -556,13 +546,17 @@
         </el-table>
     </el-dialog>
 
-    <!-- Task Path Replay Dialog -->
-    <el-dialog v-model="showTaskPathDialog" title="路径查询回放" width="700px">
-        <el-timeline v-if="taskDetail">
-            <el-timeline-item v-for="(p,idx) in taskDetail.paths" :key="idx" :type="p.status==='success'?'success':'danger'" :timestamp="p.started_at" placement="top">
-                <el-card><h4>{{ p.node_name }} <el-tag size="small">{{p.node_type}}</el-tag></h4><p>{{ p.detail }}</p><p v-if="p.data_source">数据源: {{ p.data_source }}</p></el-card>
-            </el-timeline-item>
-        </el-timeline>
+    <!-- Task Path Replay Dialog: the configured scene path actually executed + detailed results -->
+    <el-dialog v-model="showTaskPathDialog" title="路径查询回放（配置的场景路径执行详情）" width="1000px" top="3vh">
+        <el-descriptions v-if="taskDetail && taskDetail.task" :column="3" border size="small" style="margin-bottom:12px">
+            <el-descriptions-item label="任务名">{{ taskDetail.task.task_name }}</el-descriptions-item>
+            <el-descriptions-item label="IP地址">{{ taskDetail.task.ip_address }}</el-descriptions-item>
+            <el-descriptions-item label="场景">{{ taskDetail.task.scene_type || '未识别' }}</el-descriptions-item>
+            <el-descriptions-item label="开始时间">{{ taskDetail.task.start_time }}</el-descriptions-item>
+            <el-descriptions-item label="结束时间">{{ taskDetail.task.end_time }}</el-descriptions-item>
+            <el-descriptions-item label="结果数">{{ taskDetail.task.result_count }}</el-descriptions-item>
+        </el-descriptions>
+        <path-replay v-if="taskDetail" :path="taskDetail.path" :records="taskDetail.paths" :fit="900"></path-replay>
     </el-dialog>
 
     <!-- Data Source Dialog -->

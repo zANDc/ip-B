@@ -168,6 +168,7 @@ CREATE TABLE IF NOT EXISTS query_tasks (
     scene_type TEXT,
     status TEXT DEFAULT 'completed',  -- pending/running/completed/failed
     result_count INTEGER DEFAULT 0,
+    path_snapshot TEXT,       -- 执行时配置的场景路径快照JSON {name,nodes,edges}
     created_by TEXT,
     created_at TEXT,
     completed_at TEXT,
@@ -178,6 +179,7 @@ CREATE TABLE IF NOT EXISTS query_tasks (
 CREATE TABLE IF NOT EXISTS task_paths (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL,
+    node_id TEXT,             -- 对应路径快照中的节点ID
     node_name TEXT,
     node_type TEXT,           -- start/execute/judge
     status TEXT,              -- success/running/failed
@@ -260,7 +262,18 @@ def init_db():
     with get_conn() as conn:
         conn.executescript(SCHEMA)
         migrate_scene_paths(conn)
+        migrate_query_tables(conn)
     seed_data()
+
+
+def migrate_query_tables(conn):
+    """Add path_snapshot/node_id columns to existing query_tasks/task_paths tables."""
+    task_cols = [r[1] for r in conn.execute("PRAGMA table_info(query_tasks)").fetchall()]
+    if task_cols and "path_snapshot" not in task_cols:
+        conn.execute("ALTER TABLE query_tasks ADD COLUMN path_snapshot TEXT")
+    path_cols = [r[1] for r in conn.execute("PRAGMA table_info(task_paths)").fetchall()]
+    if path_cols and "node_id" not in path_cols:
+        conn.execute("ALTER TABLE task_paths ADD COLUMN node_id TEXT")
 
 
 def build_default_path(ds_items):
