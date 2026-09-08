@@ -333,78 +333,71 @@ const app = createApp({
             try { await API('/api/scenes/' + row.id + '/toggle', { method: 'PUT' }); ElMessage.success('状态已切换'); loadScenes(scenePage.value); } catch(e) { ElMessage.error(e.message); }
         };
 
-        // Path Builder (drag-drop)
+        // Data Source Config (replacing path builder)
         const showPathBuilder = ref(false);
-        const pathNodes = ref([]);
-        const pathEdges = ref([]);
-        const selectedNode = ref(null);
+        const allDataSources = ref([]);
+        const selectedDsIds = ref([]);
         const currentSceneId = ref('');
+        const currentSceneInfo = ref(null);
         const currentPathInfo = ref(null);
+
+        const loadAllDataSources = async () => {
+            try {
+                const res = await API('/api/datasources?page=1&page_size=100');
+                allDataSources.value = res.data || [];
+            } catch(e) { ElMessage.error(e.message); }
+        };
+
         const openPathBuilder = async (row) => {
             currentSceneId.value = row.id;
-            currentPathInfo.value = { name: row.name + '路径', status: 'draft' };
-            // Load existing path
+            currentSceneInfo.value = row;
+            selectedDsIds.value = [];
+            currentPathInfo.value = { name: row.name + '查询数据源配置', status: 'draft' };
+            await loadAllDataSources();
+            // Load existing config
             try {
                 const res = await API('/api/scenes/' + row.id + '/paths');
                 if (res.data && res.data.length > 0) {
                     const p = res.data[0];
                     currentPathInfo.value = { id: p.id, name: p.name, status: p.status };
-                    pathNodes.value = JSON.parse(p.nodes || '[]');
-                    pathEdges.value = JSON.parse(p.edges || '[]');
-                } else {
-                    pathNodes.value = [
-                        { id: 'n1', type: 'start', name: '开始', x: 50, y: 50 },
-                        { id: 'n2', type: 'execute', name: '查询数据源', x: 300, y: 50 },
-                        { id: 'n3', type: 'judge', name: '判断是否命中', x: 550, y: 50 },
-                    ];
-                    pathEdges.value = [{ from: 'n1', to: 'n2' }, { from: 'n2', to: 'n3' }];
+                    try {
+                        selectedDsIds.value = JSON.parse(p.data_source_ids || '[]');
+                    } catch(e) { selectedDsIds.value = []; }
                 }
             } catch(e) { ElMessage.error(e.message); }
             showPathBuilder.value = true;
         };
-        const addNode = (type) => {
-            const names = { start: '开始节点', execute: '执行节点', judge: '判断节点' };
-            pathNodes.value.push({ id: 'n' + Date.now(), type, name: names[type] + (pathNodes.value.length + 1), x: 50 + Math.random() * 600, y: 50 + Math.random() * 300 });
-        };
-        const clearCanvas = () => { pathNodes.value = []; pathEdges.value = []; selectedNode.value = null; };
-        const selectNode = (node) => {
-            if (selectedNode.value && selectedNode.value.id !== node.id) {
-                // Create edge
-                pathEdges.value.push({ from: selectedNode.value.id, to: node.id });
-                selectedNode.value = null;
+
+        const toggleDsSelect = (id) => {
+            const idx = selectedDsIds.value.indexOf(id);
+            if (idx >= 0) {
+                selectedDsIds.value.splice(idx, 1);
             } else {
-                selectedNode.value = node;
+                selectedDsIds.value.push(id);
             }
         };
-        const deleteNode = (node) => {
-            pathNodes.value = pathNodes.value.filter(n => n.id !== node.id);
-            pathEdges.value = pathEdges.value.filter(e => e.from !== node.id && e.to !== node.id);
-        };
-        const getNodePos = (id) => {
-            const n = pathNodes.value.find(n => n.id === id);
-            return n ? { x: n.x, y: n.y } : { x: 0, y: 0 };
-        };
+
         const savePath = async () => {
             try {
-                const body = { name: currentPathInfo.value.name, nodes: JSON.stringify(pathNodes.value), edges: JSON.stringify(pathEdges.value) };
+                const body = { name: currentPathInfo.value.name, data_source_ids: selectedDsIds.value };
                 if (currentPathInfo.value.id) {
                     await API(`/api/scenes/${currentSceneId.value}/paths/${currentPathInfo.value.id}`, { method: 'PUT', body });
                 } else {
                     const res = await API(`/api/scenes/${currentSceneId.value}/paths`, { method: 'POST', body });
                     currentPathInfo.value.id = res.id;
                 }
-                ElMessage.success('路径保存成功');
+                ElMessage.success('数据源配置保存成功');
             } catch(e) { ElMessage.error(e.message); }
         };
+
         const publishPath = async () => {
             await savePath();
             try {
                 await API(`/api/scenes/${currentSceneId.value}/paths/${currentPathInfo.value.id}/publish`, { method: 'PUT' });
-                ElMessage.success('路径发布成功');
+                ElMessage.success('配置发布成功，查询路由已生效');
                 currentPathInfo.value.status = 'published';
             } catch(e) { ElMessage.error(e.message); }
         };
-        const handleCanvasRightClick = (e) => { /* just prevent default */ };
 
         // Conflict Tickets
         const conflictQuery = reactive({ ticket_no: '', ip_address: '', conflict_source: '', conflict_type: '', status: '', field_name: '' });
@@ -488,7 +481,7 @@ const app = createApp({
             templateList, tplPage, tplTotal, loadTemplates, showTemplateDialog, templateForm, openTemplateDialog, saveTemplate, deleteTemplate, showTemplateDetailDialog, templateDetail, viewTemplate,
             showFieldDialog, fieldList, currentTplId, fieldForm, openFieldDialog, resetFieldForm, openEditField, saveField, deleteField,
             sceneList, scenePage, sceneTotal, loadScenes, showSceneDialog, sceneForm, openSceneDialog, saveScene, deleteScene, toggleScene,
-            showPathBuilder, pathNodes, pathEdges, selectedNode, currentSceneId, currentPathInfo, openPathBuilder, addNode, clearCanvas, selectNode, deleteNode, getNodePos, savePath, publishPath, handleCanvasRightClick,
+            showPathBuilder, allDataSources, selectedDsIds, currentSceneId, currentSceneInfo, currentPathInfo, openPathBuilder, toggleDsSelect, savePath, publishPath,
             conflictQuery, conflictList, conflictPage, conflictTotal, loadConflicts, resetConflictQuery, showConflictDetailDialog, conflictDetail, conflictLifecycle, viewConflictDetail, showProcessDialog, processForm, processConflict, submitProcessConflict,
             logQuery, logList, logPage, logTotal, loadLogs, resetLogQuery,
             securityTab, securityConfig, loadSecurityConfig, saveSecurityConfig, ipAccessList, loadIpAccess, showIpAccessDialog, ipAccessForm, openIpAccessDialog, saveIpAccess, toggleIpAccess, deleteIpAccess,

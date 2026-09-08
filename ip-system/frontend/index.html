@@ -350,7 +350,7 @@
                     <el-card>
                         <template #header>
                             <div style="display:flex;justify-content:space-between;align-items:center">
-                                <span>场景路径管理（五类IP主体信息定位场景）</span>
+                                <span>场景路径管理（配置各场景查询主体信息所对应的数据源）</span>
                                 <el-button type="primary" @click="openSceneDialog()">新增场景</el-button>
                             </div>
                         </template>
@@ -361,7 +361,7 @@
                             <el-table-column label="状态" width="90"><template #default="{row}"><el-tag :type="row.status==='enabled'?'success':'info'">{{row.status==='enabled'?'开启':'关闭'}}</el-tag></template></el-table-column>
                             <el-table-column label="操作" width="280">
                                 <template #default="{row}">
-                                    <el-button size="small" text type="primary" @click="openPathBuilder(row)">路径配置</el-button>
+                                    <el-button size="small" text type="primary" @click="openPathBuilder(row)">数据源配置</el-button>
                                     <el-button size="small" text type="success" @click="toggleScene(row)">{{row.status==='enabled'?'关闭':'开启'}}</el-button>
                                     <el-button size="small" text type="warning" @click="openSceneDialog(row)">编辑</el-button>
                                     <el-button size="small" text type="danger" @click="deleteScene(row)">删除</el-button>
@@ -658,41 +658,39 @@
         <template #footer><el-button @click="showSceneDialog=false">取消</el-button><el-button type="primary" @click="saveScene">保存</el-button></template>
     </el-dialog>
 
-    <!-- Path Builder Dialog (drag-drop) -->
-    <el-dialog v-model="showPathBuilder" title="场景查询路径配置(可视化拖拽构建)" width="900px" top="5vh">
-        <div class="path-builder-toolbar">
-            <el-button size="small" @click="addNode('start')" type="primary">+ 开始节点</el-button>
-            <el-button size="small" @click="addNode('execute')" type="success">+ 执行节点</el-button>
-            <el-button size="small" @click="addNode('judge')" type="warning">+ 判断节点</el-button>
-            <el-button size="small" @click="clearCanvas" type="danger">清空画布</el-button>
-            <el-button size="small" @click="savePath" type="primary">保存路径</el-button>
-            <el-button size="small" @click="publishPath" type="success">发布生效</el-button>
-            <el-tag>提示: 点击节点后点击另一节点可连线, 右键节点可删除</el-tag>
+    <!-- Data Source Config Dialog (replacing path builder) -->
+    <el-dialog v-model="showPathBuilder" title="场景数据源配置 — 配置该场景查询主体信息所使用的数据源" width="780px" top="5vh">
+        <el-alert v-if="currentSceneInfo" :title="`场景: ${currentSceneInfo.name}（${currentSceneInfo.scene_type}）`" type="info" :closable="false" style="margin-bottom:15px"></el-alert>
+        <el-divider content-position="left">选择查询数据源（勾选后该场景的IP主体信息将从这些数据源查询）</el-divider>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:15px">
+            <el-card v-for="ds in allDataSources" :key="ds.id" shadow="hover"
+                     :style="{border: selectedDsIds.includes(ds.id)?'2px solid #409EFF':'1px solid #ebeef5',cursor:'pointer'}"
+                     @click="toggleDsSelect(ds.id)">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                    <div>
+                        <strong>{{ ds.name }}</strong>
+                        <el-tag size="small" style="margin-left:8px">{{ ds.source_type }}</el-tag>
+                    </div>
+                    <el-checkbox :model-value="selectedDsIds.includes(ds.id)" @change="toggleDsSelect(ds.id)">选用</el-checkbox>
+                </div>
+                <div style="margin-top:8px;font-size:13px;color:#909399">
+                    权威性: <el-tag size="small" :type="ds.authority_level==='高'?'danger':ds.authority_level==='中'?'warning':'info'">{{ ds.authority_level }}</el-tag>
+                    <span style="margin-left:10px">{{ ds.description }}</span>
+                </div>
+            </el-card>
         </div>
-        <div class="path-canvas" ref="pathCanvas" @contextmenu.prevent="handleCanvasRightClick">
-            <div v-for="node in pathNodes" :key="node.id"
-                 class="path-node"
-                 :class="'node-'+node.type"
-                 :style="{left: node.x+'px', top: node.y+'px'}"
-                 @click="selectNode(node)"
-                 @contextmenu.prevent.stop="deleteNode(node)">
-                <el-icon><component :is="node.type==='start'?'Flag':node.type==='judge'?'Switch':'Cpu'"/></el-icon>
-                <span>{{ node.name }}</span>
-            </div>
-            <svg class="path-edges" v-if="pathEdges.length">
-                <line v-for="(edge,idx) in pathEdges" :key="idx"
-                      :x1="getNodePos(edge.from).x+60" :y1="getNodePos(edge.from).y+20"
-                      :x2="getNodePos(edge.to).x" :y2="getNodePos(edge.to).y+20"
-                      stroke="#409EFF" stroke-width="2" marker-end="url(#arrow)"/>
-                <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#409EFF"/></marker></defs>
-            </svg>
-        </div>
+        <el-alert v-if="selectedDsIds.length===0" title="未选择任何数据源，该场景查询将无结果返回" type="warning" :closable="false" style="margin-bottom:15px"></el-alert>
         <div v-if="currentPathInfo" style="margin-top:10px">
-            <el-tag>路径名称: {{currentPathInfo.name || '未命名'}}</el-tag>
-            <el-input v-model="currentPathInfo.name" placeholder="路径名称" style="width:200px;margin-left:10px"></el-input>
-            <el-tag style="margin-left:10px">节点数: {{pathNodes.length}}</el-tag>
+            <el-tag>配置名称</el-tag>
+            <el-input v-model="currentPathInfo.name" placeholder="配置名称" style="width:240px;margin-left:10px"></el-input>
+            <el-tag style="margin-left:10px">已选数据源: {{selectedDsIds.length}}</el-tag>
             <el-tag style="margin-left:10px" :type="currentPathInfo.status==='published'?'success':'info'">状态: {{currentPathInfo.status || 'draft'}}</el-tag>
         </div>
+        <template #footer>
+            <el-button @click="showPathBuilder=false">取消</el-button>
+            <el-button type="primary" @click="savePath">保存配置</el-button>
+            <el-button type="success" @click="publishPath">保存并发布生效</el-button>
+        </template>
     </el-dialog>
 
     <!-- Conflict Detail Dialog -->

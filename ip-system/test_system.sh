@@ -94,16 +94,19 @@ echo ">>> 5. 场景与路径管理"
 RESP=$(auth_req GET "/api/scenes")
 if echo "$RESP" | grep -q "id\|\["; then log_pass "5.1 场景列表"; else log_fail "5.1 场景列表"; fi
 
-SCENE_ID=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['id'] if d else '')" 2>/dev/null)
+SCENE_ID=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'] if d.get('data') else '')" 2>/dev/null)
 if [ -n "$SCENE_ID" ]; then
     RESP=$(auth_req GET "/api/scenes/$SCENE_ID/paths")
-    if echo "$RESP" | grep -q "id\|\["; then log_pass "5.2 场景路径列表"; else log_fail "5.2 场景路径列表"; fi
-    RESP=$(auth_req POST "/api/scenes/$SCENE_ID/paths" "{\"scene_id\":\"$SCENE_ID\",\"name\":\"测试路径T\",\"nodes\":[{\"id\":\"n1\",\"type\":\"start\"}],\"edges\":[]}")
+    if echo "$RESP" | grep -q "data_source_ids\|data_sources"; then log_pass "5.2 场景数据源配置列表"; else log_fail "5.2 场景数据源配置列表"; fi
+    # Get a data source id for the new config
+    DS_RESP=$(auth_req GET "/api/datasources?page=1&page_size=1")
+    DS_ID=$(echo "$DS_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'] if d.get('data') else '')" 2>/dev/null)
+    RESP=$(auth_req POST "/api/scenes/$SCENE_ID/paths" "{\"name\":\"测试数据源配置T\",\"data_source_ids\":[\"$DS_ID\"]}")
     PATH_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
-    if [ -n "$PATH_ID" ]; then log_pass "5.3 新增场景路径"; else log_fail "5.3 新增场景路径"; fi
+    if [ -n "$PATH_ID" ]; then log_pass "5.3 新增场景数据源配置"; else log_fail "5.3 新增场景数据源配置"; fi
     if [ -n "$PATH_ID" ]; then
         RESP=$(auth_req PUT "/api/scenes/$SCENE_ID/paths/$PATH_ID/publish")
-        if echo "$RESP" | grep -q "message\|success\|status"; then log_pass "5.4 路径发布"; else log_fail "5.4 路径发布"; fi
+        if echo "$RESP" | grep -q "message\|success\|status"; then log_pass "5.4 配置发布生效"; else log_fail "5.4 配置发布生效"; fi
     fi
 fi
 

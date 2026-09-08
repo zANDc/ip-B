@@ -2,7 +2,7 @@
 
 ## 一、系统概述
 
-本系统是安徽移动IP主体信息定位平台，基于 **FastAPI + Vue3 + Element Plus + SQLite** 技术栈构建。系统提供IP主体定位查询、数据源管理、主体信息模板管理、场景路径编排、冲突工单全生命周期管理、批量查询与人工修正、敏感信息审批、操作日志、安全配置、用户管理及数据导出等完整功能。
+本系统是安徽移动IP主体信息定位平台，基于 **FastAPI + Vue3 + Element Plus + SQLite** 技术栈构建。系统提供IP主体定位查询、数据源管理、主体信息模板管理、场景数据源配置（什么数据去什么数据源查询）、冲突工单全生命周期管理、批量查询与人工修正、敏感信息审批、操作日志、安全配置、用户管理及数据导出等完整功能。
 
 ### 系统架构
 
@@ -84,7 +84,7 @@ bash test_system.sh
 ├── 数据与路径管理
 │   ├── 数据源管理
 │   ├── 主体信息管理
-│   └── 场景路径管理
+│   └── 场景数据源配置
 ├── 数据校验
 │   └── 冲突工单检测
 └── 系统管理
@@ -307,29 +307,28 @@ bash test_system.sh
 - 修改字段：`PUT /api/templates/{id}/fields/{field_id}`
 - 删除字段：`DELETE /api/templates/{id}/fields/{field_id}`
 
-#### 3.3.3 场景路径管理
+#### 3.3.3 场景路径管理（数据源配置）
 
-管理五类场景及其查询路径编排，支持拖拽式可视化路径编辑器。
+管理五类场景，并为每个场景配置查询主体信息所对应的数据源（即"什么数据去什么数据源查询"）。查询时系统根据场景类型自动路由到已配置的数据源。
 
 **五类场景**：移网、家宽、专线、IDC、自有业务
 
-**路径编排功能**：
-- **开始节点**（蓝色）：流程起点
-- **执行节点**（绿色）：数据源查询等执行动作
-- **判断节点**（橙色）：条件判断分支
-- 节点拖拽定位
-- 节点间连线
-- 路径保存与发布（draft → published）
+**数据源配置功能**：
+- 为每个场景勾选一个或多个查询数据源
+- 配置发布后立即生效，查询任务将按配置路由到对应数据源
+- 若场景已发布配置但未选择任何数据源，则该场景查询无结果返回
+- 支持保存草稿（draft）与发布生效（published）两种状态
+- 查询路径回放将展示实际路由到的数据源
 
 **API**:
 - 场景列表：`GET /api/scenes`
 - 新增场景：`POST /api/scenes`
 - 场景状态切换：`PUT /api/scenes/{id}/toggle`
-- 路径列表：`GET /api/scenes/{id}/paths`
-- 新增路径：`POST /api/scenes/{id}/paths`
-- 修改路径：`PUT /api/scenes/{id}/paths/{path_id}`
-- 发布路径：`PUT /api/scenes/{id}/paths/{path_id}/publish`
-- 删除路径：`DELETE /api/scenes/{id}/paths/{path_id}`
+- 数据源配置列表：`GET /api/scenes/{id}/paths`
+- 新增配置：`POST /api/scenes/{id}/paths`（请求体含 `data_source_ids` 数组）
+- 修改配置：`PUT /api/scenes/{id}/paths/{path_id}`
+- 发布生效：`PUT /api/scenes/{id}/paths/{path_id}/publish`
+- 删除配置：`DELETE /api/scenes/{id}/paths/{path_id}`
 
 ---
 
