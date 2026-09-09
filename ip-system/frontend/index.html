@@ -678,9 +678,17 @@
                             <el-table-column prop="owner" label="负责人" width="80"></el-table-column>
                             <el-table-column prop="contact" label="联系方式" width="120"></el-table-column>
                             <el-table-column label="告警监控" width="90"><template #default="{row}"><el-tag :type="row.alarm_enabled?'success':'info'">{{row.alarm_enabled?'开启':'关闭'}}</el-tag></template></el-table-column>
-                            <el-table-column prop="status" label="状态" width="70"></el-table-column>
-                            <el-table-column label="操作" width="180">
+                            <el-table-column label="导入数据量" width="120" align="center">
                                 <template #default="{row}">
+                                    <el-button size="small" type="primary" link @click="viewDatasourceData(row)">
+                                        <el-icon><DataLine/></el-icon> {{dsSubjectCount[row.id] || 0}} 条
+                                    </el-button>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="status" label="状态" width="70"></el-table-column>
+                            <el-table-column label="操作" width="220">
+                                <template #default="{row}">
+                                    <el-button size="small" text type="success" @click="viewDatasourceData(row)">查看数据</el-button>
                                     <el-button size="small" text type="primary" @click="viewDataSource(row)">详情</el-button>
                                     <el-button size="small" text type="warning" @click="openDataSourceDialog(row)">编辑</el-button>
                                     <el-button size="small" text type="danger" @click="deleteDataSource(row)">删除</el-button>
@@ -690,6 +698,56 @@
                         <el-pagination style="margin-top:15px;text-align:right" v-model:current-page="dsPage" :page-size="10" :total="dsTotal" layout="total, prev, pager, next" @current-change="loadDataSources"></el-pagination>
                     </el-card>
                 </div>
+
+                <!-- 数据源导入数据查看弹窗 -->
+                <el-dialog v-model="showDsDataDialog" :title="`数据源导入数据: ${dsDataDialogTitle}`" width="1100px" top="5vh">
+                    <el-row :gutter="15" style="margin-bottom:15px" v-if="dsDataStats">
+                        <el-col :span="6"><el-card shadow="never" style="text-align:center;background:#f5f7fa"><div style="font-size:24px;font-weight:bold;color:#409EFF">{{dsDataStats.total}}</div><div style="color:#909399">总数据量</div></el-card></el-col>
+                        <el-col :span="6"><el-card shadow="never" style="text-align:center;background:#f5f7fa"><div style="font-size:24px;font-weight:bold;color:#67C23A">{{dsDataStats.evaluated}}</div><div style="color:#909399">已评估</div></el-card></el-col>
+                        <el-col :span="6"><el-card shadow="never" style="text-align:center;background:#f5f7fa"><div style="font-size:18px;font-weight:bold;color:#E6A23C">{{dsDataStats.latest_data_time || '-'}}</div><div style="color:#909399">最新数据时间</div></el-card></el-col>
+                        <el-col :span="6"><el-card shadow="never" style="text-align:center;background:#f5f7fa"><div style="font-size:18px;font-weight:bold;color:#909399">{{dsDataStats.datasource.source_type}}</div><div style="color:#909399">权威性:{{dsDataStats.datasource.authority_level}}</div></el-card></el-col>
+                    </el-row>
+                    <el-tag v-for="s in (dsDataStats?.scene_distribution||[])" :key="s.scene_type" style="margin-right:6px" type="info" effect="plain">{{s.scene_type || '未分类'}}: {{s.c}}条</el-tag>
+
+                    <el-form :inline="true" :model="dsDataQuery" style="margin-top:15px">
+                        <el-form-item label="IP地址"><el-input v-model="dsDataQuery.ip_address" clearable placeholder="模糊匹配"></el-input></el-form-item>
+                        <el-form-item><el-button type="primary" @click="loadDsData(1)">查询</el-button><el-button @click="dsDataQuery.ip_address='';loadDsData(1)">重置</el-button></el-form-item>
+                    </el-form>
+                    <el-table :data="dsDataList" border stripe size="small" max-height="420">
+                        <el-table-column type="index" label="#" width="50"></el-table-column>
+                        <el-table-column prop="ip_address" label="IP地址" width="140" fixed></el-table-column>
+                        <el-table-column prop="scene_type" label="场景" width="80"></el-table-column>
+                        <el-table-column prop="source_subtype" label="数据子类" width="80"></el-table-column>
+                        <el-table-column prop="start_time" label="起始时间" width="160"></el-table-column>
+                        <el-table-column prop="end_time" label="结束时间" width="160"></el-table-column>
+                        <el-table-column prop="city_id" label="城市编码" width="80"></el-table-column>
+                        <el-table-column prop="city_name" label="城市名" width="100"></el-table-column>
+                        <el-table-column prop="subscriber_id" label="用户标识" width="140" show-overflow-tooltip></el-table-column>
+                        <el-table-column prop="cert_no" label="证件号" width="160" show-overflow-tooltip></el-table-column>
+                        <el-table-column prop="nat_begin_port" label="NAT起始" width="80"></el-table-column>
+                        <el-table-column prop="nat_end_port" label="NAT终止" width="80"></el-table-column>
+                        <el-table-column prop="access_url" label="访问URL" width="160" show-overflow-tooltip></el-table-column>
+                        <el-table-column prop="user_permanent_id" label="用户永久ID" width="160" show-overflow-tooltip></el-table-column>
+                        <el-table-column prop="ipv4address" label="IPv4地址" width="140" show-overflow-tooltip></el-table-column>
+                        <el-table-column prop="eval_status" label="评估状态" width="100" align="center">
+                            <template #default="{row}"><el-tag :type="row.eval_status==='evaluated'?'success':'info'" size="small">{{row.eval_status==='evaluated'?'已评估':'待评估'}}</el-tag></template>
+                        </el-table-column>
+                        <el-table-column label="操作" width="80" align="center" fixed="right">
+                            <template #default="{row}"><el-button size="small" text type="primary" @click="viewSubjectDetail(row)">详情</el-button></template>
+                        </el-table-column>
+                    </el-table>
+                    <el-pagination style="margin-top:10px;text-align:right" v-model:current-page="dsDataPage" :page-size="dsDataPageSize" :total="dsDataTotal" layout="total, prev, pager, next" @current-change="loadDsData"></el-pagination>
+
+                    <!-- IP主体详情弹窗(嵌套) -->
+                    <el-dialog v-model="showSubjectDetailDialog" :title="`IP主体数据详情: ${subjectDetail?.ip_address || ''}`" width="900px" append-to-body>
+                        <el-descriptions v-if="subjectDetail" :column="2" border size="small">
+                            <el-descriptions-item v-for="(v,k) in subjectDetail" :key="k" :label="k">
+                                <span v-if="v===null || v===''" style="color:#c0c4cc">-</span>
+                                <span v-else style="word-break:break-all">{{v}}</span>
+                            </el-descriptions-item>
+                        </el-descriptions>
+                    </el-dialog>
+                </el-dialog>
 
                 <!-- Subject Template Management -->
                 <div v-show="activeMenu==='template'">

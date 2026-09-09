@@ -59,6 +59,65 @@ const app = createApp({
             if (key === 'security') loadSecurityConfig();
         };
 
+        // ================== 数据源导入数据查看 ==================
+        const dsSubjectCount = ref({});
+        const showDsDataDialog = ref(false);
+        const dsDataDialogTitle = ref('');
+        const dsDataStats = ref(null);
+        const dsDataList = ref([]);
+        const dsDataTotal = ref(0);
+        const dsDataPage = ref(1);
+        const dsDataPageSize = ref(20);
+        const dsDataQuery = ref({ ip_address: '' });
+        const currentDsId = ref('');
+        const showSubjectDetailDialog = ref(false);
+        const subjectDetail = ref(null);
+
+        const loadDsSubjectCounts = async (rows) => {
+            // 批量获取每个数据源的数据量
+            const counts = { ...dsSubjectCount.value };
+            for (const r of rows) {
+                if (counts[r.id] !== undefined) continue;
+                try {
+                    const res = await API(`/api/datasources/${r.id}/stats`);
+                    counts[r.id] = res.total;
+                } catch(e) { counts[r.id] = 0; }
+            }
+            dsSubjectCount.value = counts;
+        };
+
+        const viewDatasourceData = async (row) => {
+            currentDsId.value = row.id;
+            dsDataDialogTitle.value = `${row.name} (${row.source_type})`;
+            showDsDataDialog.value = true;
+            dsDataPage.value = 1;
+            try {
+                const stats = await API(`/api/datasources/${row.id}/stats`);
+                dsDataStats.value = stats;
+            } catch(e) { ElMessage.error(e.message); }
+            loadDsData(1);
+        };
+
+        const loadDsData = async (page) => {
+            if (page) dsDataPage.value = page;
+            if (!currentDsId.value) return;
+            try {
+                const q = dsDataQuery.value;
+                const params = new URLSearchParams();
+                if (q.ip_address) params.set('ip_address', q.ip_address);
+                params.set('page', dsDataPage.value);
+                params.set('page_size', dsDataPageSize.value);
+                const r = await API(`/api/datasources/${currentDsId.value}/subjects?` + params.toString());
+                dsDataList.value = r.items || [];
+                dsDataTotal.value = r.total || 0;
+            } catch(e) { ElMessage.error(e.message); }
+        };
+
+        const viewSubjectDetail = (row) => {
+            subjectDetail.value = row;
+            showSubjectDetailDialog.value = true;
+        };
+
         // Dashboard
         const stats = ref({});
         const dashboardCards = computed(() => [
@@ -328,7 +387,12 @@ const app = createApp({
         const loadDataSources = async (page) => {
             dsPage.value = page;
             const params = new URLSearchParams({ page, page_size: 10, ...Object.fromEntries(Object.entries(dsQuery).filter(([_,v]) => v)) });
-            try { const res = await API('/api/datasources?' + params); dsList.value = res.data; dsTotal.value = res.total; } catch(e) { ElMessage.error(e.message); }
+            try {
+                const res = await API('/api/datasources?' + params);
+                dsList.value = res.data;
+                dsTotal.value = res.total;
+                loadDsSubjectCounts(res.data);
+            } catch(e) { ElMessage.error(e.message); }
         };
         const resetDsQuery = () => { Object.keys(dsQuery).forEach(k => dsQuery[k] = ''); loadDataSources(1); };
         const showDsDialog = ref(false);
@@ -977,6 +1041,9 @@ const app = createApp({
             evalDistribution, showEvalDialog, evalForm, openEvalDialog, doEvaluate,
             showEvalDetailDialog, evalDetail, viewEvaluation, loadEvaluations, loadEvalDistribution, resetEvalQuery,
             conflictEvalList,
+            dsSubjectCount, viewDatasourceData, loadDsData, viewSubjectDetail,
+            showDsDataDialog, dsDataDialogTitle, dsDataStats, dsDataList, dsDataTotal, dsDataPage, dsDataPageSize, dsDataQuery,
+            showSubjectDetailDialog, subjectDetail,
             queryForm, queryRules, queryLoading, queryResult, handleQuery, showPathReplay, viewPathReplay,
             showManualFixDialog, manualFixForm, showManualFix, submitManualFix,
             showSensitiveDialog, sensitiveForm, sensitiveResult, sensitiveVerifyCode, showSensitive, requestSensitiveApproval, verifySensitiveApproval,

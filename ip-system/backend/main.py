@@ -790,6 +790,72 @@ def get_datasource(ds_id: str, request: Request):
         return dict(ds)
 
 
+@app.get("/api/datasources/{ds_id}/subjects")
+def get_datasource_subjects(ds_id: str, request: Request, ip_address: str = "", page: int = 1, page_size: int = 20):
+    """查看某数据源导入的IP主体数据(分页+IP搜索)"""
+    with get_conn() as conn:
+        ds = conn.execute("SELECT * FROM data_sources WHERE id=?", (ds_id,)).fetchone()
+        if not ds:
+            raise HTTPException(404, "数据源不存在")
+        # 兼容 data_source_id 和 source_id 字段
+        where = ["(s.data_source_id=? OR s.source_id=?)"]
+        params = [ds_id, ds_id]
+        if ip_address:
+            where.append("s.ip_address LIKE ?")
+            params.append(f"%{ip_address}%")
+        where.append("1=1")
+        sql_where = " AND ".join(where)
+        total = conn.execute(f"SELECT COUNT(*) c FROM ip_subjects s WHERE {sql_where}", params).fetchone()["c"]
+        rows = conn.execute(
+            f"SELECT * FROM ip_subjects s WHERE {sql_where} ORDER BY s.id DESC LIMIT ? OFFSET ?",
+            params + [page_size, (page - 1) * page_size],
+        ).fetchall()
+        items = []
+        for r in rows:
+            d = dict(r)
+            d["eval_status"] = d.get("eval_status") or "pending"
+            items.append(d)
+        return {
+            "datasource": dict(ds),
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "items": items,
+        }
+
+
+@app.get("/api/datasources/{ds_id}/stats")
+def get_datasource_stats(ds_id: str, request: Request):
+    """某数据源的导入数据统计:总数/IP段分布/最新导入时间等"""
+    with get_conn() as conn:
+        ds = conn.execute("SELECT * FROM data_sources WHERE id=?", (ds_id,)).fetchone()
+        if not ds:
+            raise HTTPException(404, "数据源不存在")
+        total = conn.execute(
+            "SELECT COUNT(*) c FROM ip_subjects WHERE data_source_id=? OR source_id=?",
+            (ds_id, ds_id),
+        ).fetchone()["c"]
+        evaluated = conn.execute(
+            "SELECT COUNT(*) c FROM ip_subjects WHERE (data_source_id=? OR source_id=?) AND eval_status='evaluated'",
+            (ds_id, ds_id),
+        ).fetchone()["c"]
+        latest = conn.execute(
+            "SELECT MAX(start_time) m FROM ip_subjects WHERE (data_source_id=? OR source_id=?)",
+            (ds_id, ds_id),
+        ).fetchone()["m"]
+        scene_dist = conn.execute(
+            "SELECT scene_type, COUNT(*) c FROM ip_subjects WHERE (data_source_id=? OR source_id=?) GROUP BY scene_type",
+            (ds_id, ds_id),
+        ).fetchall()
+        return {
+            "datasource": dict(ds),
+            "total": total,
+            "evaluated": evaluated,
+            "latest_data_time": latest,
+            "scene_distribution": [dict(r) for r in scene_dist],
+        }
+
+
 # 2.2 Subject info management (templates)
 class TemplateRequest(BaseModel):
     name: str
