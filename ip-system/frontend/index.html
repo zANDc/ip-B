@@ -52,7 +52,12 @@
                     <el-menu-item index="query-create">IP主体信息查询</el-menu-item>
                     <el-menu-item index="query-list">任务列表查询</el-menu-item>
                     <el-menu-item index="query-batch">批量导入查询</el-menu-item>
-                    <el-menu-item index="confidence"><el-icon><DataAnalysis/></el-icon><span>置信度说明</span></el-menu-item>
+                </el-sub-menu>
+                <el-sub-menu index="conf-menu">
+                    <template #title><el-icon><DataAnalysis/></el-icon><span>置信度评估</span></template>
+                    <el-menu-item index="conf-rule">评估规则配置</el-menu-item>
+                    <el-menu-item index="conf-eval">评估台账</el-menu-item>
+                    <el-menu-item index="confidence">置信度说明</el-menu-item>
                 </el-sub-menu>
                 <el-sub-menu index="data">
                     <template #title><el-icon><Coin/></el-icon><span>数据与路径管理</span></template>
@@ -286,6 +291,242 @@
                             </el-table>
                         </el-card>
                     </el-card>
+                </div>
+
+                <!-- 评估规则配置 -->
+                <div v-show="activeMenu==='conf-rule'">
+                    <el-card>
+                        <template #header>
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <span><el-icon><Setting/></el-icon> 评估维度配置(多维度加权体系)</span>
+                                <div>
+                                    <el-button type="success" @click="openDimensionDialog()">新增自定义维度</el-button>
+                                    <el-button type="warning" @click="batchEvaluate">批量评估</el-button>
+                                    <el-button @click="loadDimensions">刷新</el-button>
+                                </div>
+                            </div>
+                        </template>
+                        <el-alert title="维度说明" type="info" :closable="false" show-icon style="margin-bottom:15px">
+                            <template #default>
+                                主维度按权重加权求和,综合分 = Σ(维度分数×权重%)。风险扣分项为独立扣分,触发后从综合分中扣除。
+                            </template>
+                        </el-alert>
+                        <h4>主维度(按权重加权)</h4>
+                        <el-table :data="mainDimensions" border stripe>
+                            <el-table-column prop="dim_name" label="维度名" width="140"></el-table-column>
+                            <el-table-column prop="dim_code" label="代码" width="120"></el-table-column>
+                            <el-table-column prop="description" label="说明" show-overflow-tooltip></el-table-column>
+                            <el-table-column label="权重" width="160" align="center">
+                                <template #default="{row}">
+                                    <el-input-number v-model="row.weight" :min="0" :max="100" size="small" @change="saveDimensionWeight(row)" style="width:120px"></el-input-number>
+                                    <span style="margin-left:5px;color:#909399">%</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="评分模式" width="100">
+                                <template #default="{row}">
+                                    <el-tag size="small" :type="row.score_mode==='enum'?'success':row.score_mode==='threshold'?'warning':'info'">{{row.score_mode}}</el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="启用" width="80" align="center">
+                                <template #default="{row}">
+                                    <el-switch v-model="row.enabled" :active-value="1" :inactive-value="0" @change="saveDimensionEnabled(row)"></el-switch>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="160" align="center">
+                                <template #default="{row}">
+                                    <el-button size="small" text type="primary" @click="openDimensionDialog(row)">编辑</el-button>
+                                    <el-button size="small" text type="danger" @click="deleteDimension(row)">删除</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                        <h4 style="margin-top:25px">风险扣分项(独立于主维度)</h4>
+                        <el-table :data="riskDimensions" border stripe>
+                            <el-table-column prop="dim_name" label="扣分项" width="140"></el-table-column>
+                            <el-table-column prop="dim_code" label="代码" width="140"></el-table-column>
+                            <el-table-column prop="description" label="触发条件说明" show-overflow-tooltip></el-table-column>
+                            <el-table-column label="扣分值" width="120" align="center">
+                                <template #default="{row}">
+                                    <el-tag type="danger" effect="dark">-{{row.risk_value}}分</el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="启用" width="80" align="center">
+                                <template #default="{row}">
+                                    <el-switch v-model="row.enabled" :active-value="1" :inactive-value="0" @change="saveDimensionEnabled(row)"></el-switch>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="160" align="center">
+                                <template #default="{row}">
+                                    <el-button size="small" text type="primary" @click="openDimensionDialog(row)">编辑</el-button>
+                                    <el-button size="small" text type="danger" @click="deleteDimension(row)">删除</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                    </el-card>
+
+                    <!-- 维度编辑/新增弹窗 -->
+                    <el-dialog v-model="showDimensionDialog" :title="dimensionForm.id?'编辑维度':'新增维度'" width="560px">
+                        <el-form :model="dimensionForm" label-width="100px">
+                            <el-form-item label="维度代码"><el-input v-model="dimensionForm.dim_code" :disabled="!!dimensionForm.id" placeholder="英文代码,如consistency"></el-input></el-form-item>
+                            <el-form-item label="维度名称"><el-input v-model="dimensionForm.dim_name" placeholder="如 字段完整度"></el-input></el-form-item>
+                            <el-form-item label="是否风险扣分项"><el-switch v-model="dimensionForm.is_risk" :active-value="1" :inactive-value="0"></el-switch></el-form-item>
+                            <el-form-item v-if="!dimensionForm.is_risk" label="权重(%)">
+                                <el-input-number v-model="dimensionForm.weight" :min="0" :max="100"></el-input-number>
+                            </el-form-item>
+                            <el-form-item v-if="dimensionForm.is_risk" label="扣分值(分)">
+                                <el-input-number v-model="dimensionForm.risk_value" :min="1" :max="100"></el-input-number>
+                            </el-form-item>
+                            <el-form-item label="评分模式" v-if="!dimensionForm.is_risk">
+                                <el-select v-model="dimensionForm.score_mode" style="width:100%">
+                                    <el-option label="直接给分" value="score"></el-option>
+                                    <el-option label="等级枚举(高/中/低)" value="enum"></el-option>
+                                    <el-option label="阈值分段" value="threshold"></el-option>
+                                </el-select>
+                            </el-form-item>
+                            <el-form-item label="说明"><el-input v-model="dimensionForm.description" type="textarea" :rows="3" placeholder="用户可读的维度说明"></el-input></el-form-item>
+                        </el-form>
+                        <template #footer>
+                            <el-button @click="showDimensionDialog=false">取消</el-button>
+                            <el-button type="primary" @click="saveDimension">保存</el-button>
+                        </template>
+                    </el-dialog>
+                </div>
+
+                <!-- 评估台账 -->
+                <div v-show="activeMenu==='conf-eval'">
+                    <el-card>
+                        <template #header>
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <span><el-icon><Document/></el-icon> 置信度评估台账(共{{ evalTotal }}条)</span>
+                                <div>
+                                    <el-button type="warning" @click="batchEvaluate">批量评估</el-button>
+                                    <el-button type="primary" @click="openEvalDialog">单IP评估</el-button>
+                                    <el-button @click="loadEvaluations(1)">刷新</el-button>
+                                </div>
+                            </div>
+                        </template>
+                        <el-row :gutter="15" style="margin-bottom:15px">
+                            <el-col :span="12">
+                                <el-card shadow="never" style="background:#f5f7fa">
+                                    <div style="display:flex;justify-content:space-around;text-align:center">
+                                        <div><div style="font-size:24px;color:#67C23A;font-weight:bold">{{evalDistribution.高||0}}</div><div style="color:#909399">高(>=85)</div></div>
+                                        <div><div style="font-size:24px;color:#E6A23C;font-weight:bold">{{evalDistribution.中||0}}</div><div style="color:#909399">中(60-84)</div></div>
+                                        <div><div style="font-size:24px;color:#F56C6C;font-weight:bold">{{evalDistribution.低||0}}</div><div style="color:#909399">低(<60)</div></div>
+                                    </div>
+                                </el-card>
+                            </el-col>
+                            <el-col :span="12">
+                                <el-card shadow="never" style="background:#fafafa">
+                                    <div style="font-size:13px;color:#606266;line-height:1.8">
+                                        <div><b>多色分级标尺:</b></div>
+                                        <div style="display:flex;align-items:center;gap:4px;margin-top:4px">
+                                            <div style="width:25%;height:14px;background:#67C23A;border-radius:2px 0 0 2px"></div>
+                                            <div style="width:25%;height:14px;background:#85CE61"></div>
+                                            <div style="width:25%;height:14px;background:#E6A23C"></div>
+                                            <div style="width:25%;height:14px;background:#F56C6C;border-radius:0 2px 2px 0"></div>
+                                        </div>
+                                        <div style="display:flex;font-size:11px;color:#909399;margin-top:2px"><div style="width:25%">0</div><div style="width:25%">60</div><div style="width:25%">70</div><div style="width:25%">85-100</div></div>
+                                    </div>
+                                </el-card>
+                            </el-col>
+                        </el-row>
+                        <el-form :inline="true" :model="evalQuery">
+                            <el-form-item label="IP地址"><el-input v-model="evalQuery.ip_address" clearable placeholder="模糊匹配"></el-input></el-form-item>
+                            <el-form-item label="数据源名称"><el-input v-model="evalQuery.source_name" clearable placeholder="模糊匹配"></el-input></el-form-item>
+                            <el-form-item label="源字段"><el-input v-model="evalQuery.field_name" clearable placeholder="模糊匹配"></el-input></el-form-item>
+                            <el-form-item label="等级"><el-select v-model="evalQuery.level" clearable style="width:100px"><el-option label="高" value="高"/><el-option label="中" value="中"/><el-option label="低" value="低"/></el-select></el-form-item>
+                            <el-form-item label="评估时间"><el-date-picker v-model="evalTimeRange" type="datetimerange" range-separator="至" value-format="YYYY-MM-DD HH:mm:ss" style="width:340px"></el-date-picker></el-form-item>
+                            <el-form-item>
+                                <el-button type="primary" @click="loadEvaluations(1)">查询</el-button>
+                                <el-button @click="resetEvalQuery">重置</el-button>
+                            </el-form-item>
+                        </el-form>
+                        <el-table :data="evalList" border stripe>
+                            <el-table-column type="index" label="#" width="50"></el-table-column>
+                            <el-table-column prop="ip_address" label="IP地址" width="140"></el-table-column>
+                            <el-table-column prop="source_name" label="数据源" width="160" show-overflow-tooltip></el-table-column>
+                            <el-table-column prop="field_name" label="源字段" width="120">
+                                <template #default="{row}">{{row.field_name||'-'}}</template>
+                            </el-table-column>
+                            <el-table-column prop="eval_time" label="评估时间" width="160"></el-table-column>
+                            <el-table-column label="综合总分" width="120" align="center" fixed="right">
+                                <template #default="{row}">
+                                    <el-progress :percentage="row.total_score" :color="row.total_score>=85?'#67C23A':row.total_score>=60?'#E6A23C':'#F56C6C'" :stroke-width="16" :format="()=>row.total_score+'%'"></el-progress>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="等级" width="80" align="center">
+                                <template #default="{row}">
+                                    <el-tag :type="row.level==='高'?'success':row.level==='中'?'warning':'danger'" effect="dark">{{row.level}}</el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="维度分项" width="200" show-overflow-tooltip>
+                                <template #default="{row}">
+                                    <span v-for="d in (row.dimension_scores||[]).slice(0,3)" :key="d.code" style="margin-right:8px;font-size:12px">
+                                        <el-tag size="small" effect="plain">{{d.name.slice(0,4)}} {{d.score}}%</el-tag>
+                                    </span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="扣分项" width="150">
+                                <template #default="{row}">
+                                    <el-tag v-for="r in (row.risk_deductions||[])" :key="r.code" type="danger" size="small" effect="plain" style="margin-right:4px;margin-bottom:2px">-{{r.deduct}} {{r.name}}</el-tag>
+                                    <span v-if="!row.risk_deductions || !row.risk_deductions.length" style="color:#909399">-</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="100" align="center" fixed="right">
+                                <template #default="{row}">
+                                    <el-button size="small" text type="primary" @click="viewEvaluation(row)">详情</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                        <el-pagination style="margin-top:15px;text-align:right" v-model:current-page="evalPage" :page-size="evalPageSize" :total="evalTotal" layout="total, prev, pager, next" @current-change="loadEvaluations"></el-pagination>
+                    </el-card>
+
+                    <!-- 评估详情弹窗 -->
+                    <el-dialog v-model="showEvalDetailDialog" title="评估详情" width="720px">
+                        <div v-if="evalDetail">
+                            <el-descriptions :column="2" border>
+                                <el-descriptions-item label="IP地址">{{evalDetail.ip_address}}</el-descriptions-item>
+                                <el-descriptions-item label="数据源">{{evalDetail.source_name}}</el-descriptions-item>
+                                <el-descriptions-item label="评估时间">{{evalDetail.eval_time}}</el-descriptions-item>
+                                <el-descriptions-item label="综合总分">
+                                    <el-tag :type="evalDetail.level==='高'?'success':evalDetail.level==='中'?'warning':'danger'" effect="dark">{{evalDetail.total_score}}% ({{evalDetail.level}})</el-tag>
+                                </el-descriptions-item>
+                            </el-descriptions>
+                            <h4 style="margin-top:20px">各维度分项得分</h4>
+                            <el-table :data="evalDetail.dimension_scores" border>
+                                <el-table-column prop="name" label="维度" width="140"></el-table-column>
+                                <el-table-column prop="weight" label="权重" width="80">
+                                    <template #default="{row}">{{row.weight}}%</template>
+                                </el-table-column>
+                                <el-table-column label="得分" width="200">
+                                    <template #default="{row}">
+                                        <el-progress :percentage="row.score" :color="row.score>=85?'#67C23A':row.score>=60?'#E6A23C':'#F56C6C'"></el-progress>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column prop="note" label="说明" show-overflow-tooltip></el-table-column>
+                            </el-table>
+                            <h4 style="margin-top:20px" v-if="evalDetail.risk_deductions && evalDetail.risk_deductions.length">触发的风险扣分项</h4>
+                            <el-table v-if="evalDetail.risk_deductions && evalDetail.risk_deductions.length" :data="evalDetail.risk_deductions" border>
+                                <el-table-column prop="name" label="扣分项" width="140"></el-table-column>
+                                <el-table-column label="扣分" width="100"><template #default="{row}"><el-tag type="danger">-{{row.deduct}}</el-tag></template></el-table-column>
+                                <el-table-column prop="reason" label="触发原因"></el-table-column>
+                            </el-table>
+                        </div>
+                        <template #footer>
+                            <el-button type="primary" @click="showEvalDetailDialog=false">关闭</el-button>
+                        </template>
+                    </el-dialog>
+
+                    <!-- 单IP评估弹窗 -->
+                    <el-dialog v-model="showEvalDialog" title="单IP评估" width="480px">
+                        <el-form :model="evalForm" label-width="100px">
+                            <el-form-item label="IP地址"><el-input v-model="evalForm.ip_address" placeholder="如 10.2.0.1"></el-input></el-form-item>
+                            <el-form-item label="数据源(可选)"><el-input v-model="evalForm.source_name" placeholder="如 留空则评估该IP的所有源"></el-input></el-form-item>
+                        </el-form>
+                        <template #footer>
+                            <el-button @click="showEvalDialog=false">取消</el-button>
+                            <el-button type="primary" @click="doEvaluate">开始评估</el-button>
+                        </template>
+                    </el-dialog>
                 </div>
 
                 <!-- 置信度说明 & 分布 -->
@@ -951,7 +1192,7 @@
     </el-dialog>
 
     <!-- Conflict Detail Dialog -->
-    <el-dialog v-model="showConflictDetailDialog" title="冲突工单详情" width="700px">
+    <el-dialog v-model="showConflictDetailDialog" title="冲突工单详情" width="900px">
         <el-descriptions v-if="conflictDetail" :column="2" border>
             <el-descriptions-item label="工单号">{{ conflictDetail.ticket_no }}</el-descriptions-item>
             <el-descriptions-item label="IP地址">{{ conflictDetail.ip_address }}</el-descriptions-item>
@@ -963,6 +1204,35 @@
             <el-descriptions-item label="冲突描述" :span="2">{{ conflictDetail.conflict_desc }}</el-descriptions-item>
             <el-descriptions-item label="源数据值" :span="2">{{ conflictDetail.source_values }}</el-descriptions-item>
         </el-descriptions>
+
+        <el-divider><el-icon><DataAnalysis/></el-icon> 该IP冲突字段的置信度评估数据</el-divider>
+        <div v-if="conflictEvalList && conflictEvalList.length">
+            <el-alert :title="`IP ${conflictDetail.ip_address} 共 ${conflictEvalList.length} 条评估记录,以下是按数据源维度分项展示`" type="info" :closable="false" show-icon style="margin-bottom:10px"></el-alert>
+            <el-table :data="conflictEvalList" border stripe size="small">
+                <el-table-column prop="source_name" label="数据源" width="160" show-overflow-tooltip></el-table-column>
+                <el-table-column prop="eval_time" label="评估时间" width="160"></el-table-column>
+                <el-table-column label="综合总分" width="120" align="center">
+                    <template #default="{row}">
+                        <el-tag :type="row.level==='高'?'success':row.level==='中'?'warning':'danger'" effect="dark">{{row.total_score}}% ({{row.level}})</el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column label="维度分项" width="300" show-overflow-tooltip>
+                    <template #default="{row}">
+                        <span v-for="d in (row.dimension_scores||[])" :key="d.code" style="margin-right:6px;font-size:12px">
+                            <el-tag size="small" effect="plain">{{d.name}} {{d.score}}%</el-tag>
+                        </span>
+                    </template>
+                </el-table-column>
+                <el-table-column label="风险扣分" show-overflow-tooltip>
+                    <template #default="{row}">
+                        <el-tag v-for="r in (row.risk_deductions||[])" :key="r.code" type="danger" size="small" effect="plain" style="margin-right:4px">-{{r.deduct}} {{r.name}}</el-tag>
+                        <span v-if="!row.risk_deductions || !row.risk_deductions.length" style="color:#909399">无</span>
+                    </template>
+                </el-table-column>
+            </el-table>
+        </div>
+        <el-empty v-else description="该IP暂无置信度评估数据,可在'评估台账'页点击'单IP评估'生成" style="margin:20px 0"></el-empty>
+
         <el-divider>工单生命周期时间线</el-divider>
         <el-timeline v-if="conflictLifecycle">
             <el-timeline-item v-for="(lc,idx) in conflictLifecycle" :key="idx" :timestamp="lc.time" placement="top">

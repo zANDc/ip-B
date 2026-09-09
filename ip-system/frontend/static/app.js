@@ -37,7 +37,8 @@ const app = createApp({
         const activeMenu = ref('dashboard');
         const menuTitles = {
             'dashboard': '系统首页', 'query-create': 'IP主体信息查询', 'query-list': '任务列表查询', 'query-batch': '批量导入查询',
-            'confidence': '置信度说明', 'datasource': '数据源管理', 'template': '主体信息管理', 'scene': '场景路径管理', 'dictionary': '数据字典配置',
+            'conf-rule': '评估规则配置', 'conf-eval': '评估台账', 'confidence': '置信度说明',
+            'datasource': '数据源管理', 'template': '主体信息管理', 'scene': '场景路径管理', 'dictionary': '数据字典配置',
             'conflict': '冲突工单检测', 'log': '日志管理', 'security': '安全配置'
         };
         const pageTitle = computed(() => menuTitles[activeMenu.value] || '');
@@ -46,6 +47,8 @@ const app = createApp({
             if (key === 'dashboard') loadDashboard();
             if (key === 'query-list') loadTasks(1);
             if (key === 'query-batch') { /* ready */ }
+            if (key === 'conf-rule') loadDimensions();
+            if (key === 'conf-eval') { loadEvaluations(1); loadEvalDistribution(); }
             if (key === 'confidence') loadConfidenceStats();
             if (key === 'datasource') { loadAllTemplates(); loadDataSources(1); }
             if (key === 'template') loadTemplates(1);
@@ -78,6 +81,123 @@ const app = createApp({
                 confidenceStats.value = r;
                 confidenceBySource.value = r.by_source || [];
                 confidenceDetails.value = r.details || [];
+            } catch(e) { ElMessage.error(e.message); }
+        };
+
+        // ================== 置信度评估规则配置 ==================
+        const dimensions = ref([]);
+        const mainDimensions = computed(() => (dimensions.value || []).filter(d => !d.is_risk));
+        const riskDimensions = computed(() => (dimensions.value || []).filter(d => d.is_risk));
+        const showDimensionDialog = ref(false);
+        const dimensionForm = ref({ id: '', dim_code: '', dim_name: '', description: '', weight: 10, risk_value: 5, is_risk: 0, score_mode: 'score', config: '{}' });
+        const loadDimensions = async () => {
+            try {
+                const r = await API('/api/confidence/dimensions');
+                dimensions.value = r.data || [];
+            } catch(e) { ElMessage.error(e.message); }
+        };
+        const openDimensionDialog = (row) => {
+            if (row) {
+                dimensionForm.value = { ...row, config: typeof row.config === 'object' ? JSON.stringify(row.config) : (row.config || '{}') };
+            } else {
+                dimensionForm.value = { id: '', dim_code: '', dim_name: '', description: '', weight: 10, risk_value: 5, is_risk: 0, score_mode: 'score', config: '{}' };
+            }
+            showDimensionDialog.value = true;
+        };
+        const saveDimension = async () => {
+            try {
+                const f = dimensionForm.value;
+                if (!f.dim_code || !f.dim_name) { ElMessage.warning('请填写代码和名称'); return; }
+                let config = {};
+                try { config = JSON.parse(f.config || '{}'); } catch(e) { ElMessage.error('config 必须是 JSON'); return; }
+                const payload = { ...f, config };
+                if (f.id) {
+                    await API('/api/confidence/dimensions/' + f.id, { method: 'PUT', body: payload });
+                } else {
+                    await API('/api/confidence/dimensions', { method: 'POST', body: payload });
+                }
+                ElMessage.success('保存成功');
+                showDimensionDialog.value = false;
+                loadDimensions();
+            } catch(e) { ElMessage.error(e.message); }
+        };
+        const deleteDimension = async (row) => {
+            try { await ElMessageBox.confirm(`确认删除维度[${row.dim_name}]?`, '提示', { type: 'warning' }); }
+            catch(e) { return; }
+            try {
+                await API('/api/confidence/dimensions/' + row.id, { method: 'DELETE' });
+                ElMessage.success('已删除');
+                loadDimensions();
+            } catch(e) { ElMessage.error(e.message); }
+        };
+        const saveDimensionWeight = async (row) => {
+            try { await API('/api/confidence/dimensions/' + row.id, { method: 'PUT', body: { weight: row.weight } }); }
+            catch(e) { ElMessage.error(e.message); }
+        };
+        const saveDimensionEnabled = async (row) => {
+            try { await API('/api/confidence/dimensions/' + row.id, { method: 'PUT', body: { enabled: row.enabled } }); ElMessage.success('已更新'); }
+            catch(e) { ElMessage.error(e.message); }
+        };
+        const batchEvaluate = async () => {
+            try {
+                const r = await API('/api/confidence/evaluate/batch', { method: 'POST', body: {} });
+                ElMessage.success(`已批量评估 ${r.evaluated} 条`);
+                if (activeMenu.value === 'conf-eval') loadEvaluations(1);
+            } catch(e) { ElMessage.error(e.message); }
+        };
+
+        // ================== 评估台账 ==================
+        const evalList = ref([]);
+        const evalTotal = ref(0);
+        const evalPage = ref(1);
+        const evalPageSize = ref(20);
+        const evalQuery = ref({ ip_address: '', source_name: '', field_name: '', level: '' });
+        const evalTimeRange = ref([]);
+        const evalDistribution = ref({});
+        const showEvalDialog = ref(false);
+        const evalForm = ref({ ip_address: '', source_name: '' });
+        const showEvalDetailDialog = ref(false);
+        const evalDetail = ref(null);
+        const loadEvaluations = async (page) => {
+            if (page) evalPage.value = page;
+            try {
+                const q = evalQuery.value;
+                const params = new URLSearchParams();
+                if (q.ip_address) params.set('ip_address', q.ip_address);
+                if (q.source_name) params.set('source_name', q.source_name);
+                if (q.field_name) params.set('field_name', q.field_name);
+                if (q.level) params.set('level', q.level);
+                if (evalTimeRange.value && evalTimeRange.value.length === 2) {
+                    params.set('start_time', evalTimeRange.value[0]);
+                    params.set('end_time', evalTimeRange.value[1]);
+                }
+                params.set('page', evalPage.value);
+                params.set('page_size', evalPageSize.value);
+                const r = await API('/api/confidence/evaluations?' + params.toString());
+                evalList.value = r.items || [];
+                evalTotal.value = r.total || 0;
+            } catch(e) { ElMessage.error(e.message); }
+        };
+        const loadEvalDistribution = async () => {
+            try {
+                const r = await API('/api/confidence/distribution');
+                evalDistribution.value = r.distribution || {};
+            } catch(e) { console.error(e); }
+        };
+        const resetEvalQuery = () => { evalQuery.value = { ip_address: '', source_name: '', field_name: '', level: '' }; evalTimeRange.value = []; loadEvaluations(1); };
+        const openEvalDialog = () => { evalForm.value = { ip_address: '', source_name: '' }; showEvalDialog.value = true; };
+        const doEvaluate = async () => {
+            try {
+                const r = await API('/api/confidence/evaluate', { method: 'POST', body: evalForm.value });
+                ElMessage.success(`已评估 ${r.results.length} 条`);
+                showEvalDialog.value = false;
+                loadEvaluations(1);
+            } catch(e) { ElMessage.error(e.message); }
+        };
+        const viewEvaluation = async (row) => {
+            try {
+                evalDetail.value = await API('/api/confidence/evaluations/' + row.id);
+                showEvalDetailDialog.value = true;
             } catch(e) { ElMessage.error(e.message); }
         };
 
@@ -743,8 +863,19 @@ const app = createApp({
         const showConflictDetailDialog = ref(false);
         const conflictDetail = ref(null);
         const conflictLifecycle = ref(null);
+        const conflictEvalList = ref([]);  // 冲突工单关联的置信度评估列表
         const viewConflictDetail = async (row) => {
-            try { conflictDetail.value = await API('/api/conflicts/' + row.id); showConflictDetailDialog.value = true; const lc = await API('/api/conflicts/' + row.id + '/lifecycle'); conflictLifecycle.value = lc.lifecycle; } catch(e) { ElMessage.error(e.message); }
+            try {
+                conflictDetail.value = await API('/api/conflicts/' + row.id);
+                showConflictDetailDialog.value = true;
+                const lc = await API('/api/conflicts/' + row.id + '/lifecycle');
+                conflictLifecycle.value = lc.lifecycle;
+                // 加载该IP的置信度评估数据
+                try {
+                    const er = await API('/api/confidence/by-ip/' + encodeURIComponent(row.ip_address));
+                    conflictEvalList.value = er.items || [];
+                } catch(e) { conflictEvalList.value = []; }
+            } catch(e) { ElMessage.error(e.message); }
         };
         const showProcessDialog = ref(false);
         const processForm = reactive({ action: '', handle_remark: '', handle_evidence: '', handler: 'admin', ticket_id: '' });
@@ -839,6 +970,13 @@ const app = createApp({
             activeMenu, pageTitle, handleMenuSelect,
             stats, dashboardCards,
             confidenceStats, confidenceBySource, confidenceDetails, loadConfidenceStats,
+            dimensions, mainDimensions, riskDimensions, loadDimensions,
+            showDimensionDialog, dimensionForm, openDimensionDialog, saveDimension, deleteDimension,
+            saveDimensionWeight, saveDimensionEnabled, batchEvaluate,
+            evalList, evalTotal, evalPage, evalPageSize, evalQuery, evalTimeRange,
+            evalDistribution, showEvalDialog, evalForm, openEvalDialog, doEvaluate,
+            showEvalDetailDialog, evalDetail, viewEvaluation, loadEvaluations, loadEvalDistribution, resetEvalQuery,
+            conflictEvalList,
             queryForm, queryRules, queryLoading, queryResult, handleQuery, showPathReplay, viewPathReplay,
             showManualFixDialog, manualFixForm, showManualFix, submitManualFix,
             showSensitiveDialog, sensitiveForm, sensitiveResult, sensitiveVerifyCode, showSensitive, requestSensitiveApproval, verifySensitiveApproval,

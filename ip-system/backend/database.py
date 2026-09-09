@@ -596,6 +596,47 @@ CREATE INDEX IF NOT EXISTS idx_query_audit_ip ON query_audit(query_params, creat
 CREATE INDEX IF NOT EXISTS idx_async_tasks_status ON async_tasks(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_alarm_records_status ON alarm_records(status, triggered_at);
 CREATE INDEX IF NOT EXISTS idx_conflict_tickets_status ON conflict_tickets(status, created_at);
+
+-- 置信度评估规则表
+CREATE TABLE IF NOT EXISTS confidence_dimensions (
+    id TEXT PRIMARY KEY,
+    dim_code TEXT UNIQUE NOT NULL,    -- 维度代码: authority/completeness/freshness/consistency
+    dim_name TEXT NOT NULL,            -- 维度名称
+    description TEXT,                  -- 维度说明
+    weight INTEGER DEFAULT 0,          -- 加权系数(0-100)
+    score_mode TEXT DEFAULT 'score',   -- 评分模式: score(直接给分)/enum(等级枚举)/threshold(阈值)
+    config TEXT,                       -- 维度配置 JSON: 比如等级区间
+    is_required INTEGER DEFAULT 1,     -- 是否必启用
+    is_risk INTEGER DEFAULT 0,         -- 是否风险扣分项(独立于主维度)
+    risk_value INTEGER DEFAULT 0,      -- 风险扣分值(分数)
+    display_order INTEGER DEFAULT 0,
+    enabled INTEGER DEFAULT 1,
+    created_at TEXT,
+    updated_at TEXT
+);
+
+-- 置信度评估台账(每条IP的一次评估)
+CREATE TABLE IF NOT EXISTS confidence_evaluations (
+    id TEXT PRIMARY KEY,
+    access_key TEXT,                  -- 访问标识(可关联ip_subjects.id)
+    ip_address TEXT NOT NULL,
+    source_id TEXT,                   -- 数据源ID
+    source_name TEXT,                 -- 数据源名称
+    field_name TEXT,                  -- 源字段(可选:对单字段做评估)
+    eval_time TEXT NOT NULL,          -- 评估时间
+    total_score REAL DEFAULT 0,        -- 综合总分(0-100)
+    level TEXT DEFAULT '中',           -- 质量等级: 高/中/低
+    risk_deductions TEXT,             -- 触发的风险扣分项 JSON数组
+    dimension_scores TEXT,            -- 各维度分项得分 JSON
+    subject_snapshot TEXT,            -- 评估时的主体快照 JSON
+    created_at TEXT,
+    FOREIGN KEY (source_id) REFERENCES data_sources(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_confidence_eval_ip ON confidence_evaluations(ip_address, eval_time);
+CREATE INDEX IF NOT EXISTS idx_confidence_eval_source ON confidence_evaluations(source_name, eval_time);
+CREATE INDEX IF NOT EXISTS idx_confidence_eval_field ON confidence_evaluations(field_name, eval_time);
+CREATE INDEX IF NOT EXISTS idx_confidence_eval_time ON confidence_evaluations(eval_time);
 """
 
 
@@ -606,9 +647,11 @@ def init_db():
         migrate_scene_paths(conn)
         migrate_query_tables(conn)
         migrate_ip_subjects(conn)
+        migrate_confidence_eval(conn)
     seed_data()
     seed_data_dictionary()
     seed_real_test_data()
+    seed_confidence_eval()
 
 
 def seed_data_dictionary():
@@ -1000,6 +1043,57 @@ def log_operation(conn, op_type, operator, url, detail, ip="127.0.0.1"):
         "INSERT INTO operation_logs (id, operation_time, operation_type, operator, request_url, operation_detail, ip_address, created_at) VALUES (?,?,?,?,?,?,?,?)",
         (gen_id("log_"), now_str(), op_type, operator, url, detail, ip, now_str()),
     )
+
+
+def migrate_confidence_eval(conn):
+    """迁移:为ip_subjects添加 eval_status 字段;确保 confidence_dimensions / confidence_evaluations 已建"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(ip_subjects)").fetchall()}
+    if "eval_status" not in cols:
+        conn.execute("ALTER TABLE ip_subjects ADD COLUMN eval_status TEXT DEFAULT 'pending'")  # pending/evaluated
+    if "last_eval_time" not in cols:
+        conn.execute("ALTER TABLE ip_subjects ADD COLUMN last_eval_time TEXT")
+
+
+def seed_confidence_eval():
+    """初始化置信度评估维度(主维度+风险扣分项)"""
+    with get_conn() as conn:
+        # 主维度(默认4个)
+        main_dims = [
+            ("authority", "数据源权威性", 30,
+             "根据数据源配置的权威性等级(高/中/低)评估,高=95/中=75/低=55",
+             "enum", json.dumps({"高": 95, "中": 75, "低": 55}, ensure_ascii=False), 1, 0, 0),
+            ("completeness", "字段完整度", 30,
+             "基于IP主体信息模板的字段定义,计算非空字段占比",
+             "score", json.dumps({"full_score": 100}, ensure_ascii=False), 1, 0, 0),
+            ("freshness", "时间新鲜度", 20,
+             "基于数据起始时间与当前时间的间隔,越近越新。1天内=100,7天内=90,30天内=75,90天内=55,90天以上=30",
+             "score", json.dumps({"day1": 100, "day7": 90, "day30": 75, "day90": 55, "day90p": 30}, ensure_ascii=False), 1, 0, 0),
+            ("consistency", "多源一致性", 20,
+             "同一IP在多数据源中字段值的一致性,差异越小分数越高",
+             "score", json.dumps({"full_score": 100}, ensure_ascii=False), 1, 0, 0),
+        ]
+        for code, name, weight, desc, mode, conf, required, is_risk, risk_value in main_dims:
+            existing = conn.execute("SELECT id FROM confidence_dimensions WHERE dim_code=?", (code,)).fetchone()
+            if not existing:
+                conn.execute(
+                    "INSERT INTO confidence_dimensions (id, dim_code, dim_name, description, weight, score_mode, config, is_required, is_risk, risk_value, display_order, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (gen_id("dim_"), code, name, desc, weight, mode, conf, required, is_risk, risk_value, len(main_dims), 1, now_str(), now_str())
+                )
+
+        # 风险扣分项(独立于主维度)
+        risks = [
+            ("risk_suspicious", "可疑数据", 10, "命中可疑IP/账号黑名单时扣除10分"),
+            ("risk_anonymous", "匿名访问", 5, "用户访问标识为匿名时扣除5分"),
+            ("risk_outdated", "严重过期", 15, "数据超过180天未更新扣除15分"),
+            ("risk_conflict", "多源冲突", 8, "同一字段多源结果不一致扣除8分"),
+        ]
+        for code, name, val, desc in risks:
+            existing = conn.execute("SELECT id FROM confidence_dimensions WHERE dim_code=?", (code,)).fetchone()
+            if not existing:
+                conn.execute(
+                    "INSERT INTO confidence_dimensions (id, dim_code, dim_name, description, weight, score_mode, config, is_required, is_risk, risk_value, display_order, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (gen_id("dim_"), code, name, desc, 0, "risk", "{}", 0, 1, val, 100, 1, now_str(), now_str())
+                )
 
 
 def seed_data():

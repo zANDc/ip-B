@@ -2064,6 +2064,122 @@ def startup():
     init_db()
 
 
+# ================== 置信度评估规则 & 台账 API ==================
+
+@app.get("/api/confidence/dimensions")
+def confidence_dimensions():
+    """列出所有评估维度(主维度+风险扣分项)"""
+    import confidence_eval as ce
+    rows = ce.list_dimensions()
+    # 解析 config JSON
+    for r in rows:
+        try:
+            r["config"] = json.loads(r.get("config") or "{}")
+        except Exception:
+            r["config"] = {}
+    return {"data": rows}
+
+
+@app.post("/api/confidence/dimensions")
+def confidence_dimensions_create(req: dict, request: Request):
+    import confidence_eval as ce
+    from database import get_conn
+    dim_id = ce.create_dimension(req)
+    with get_conn() as conn:
+        log_operation(conn, "新增评估维度", "admin", str(request.url), f"新增评估维度:{req.get('dim_code','')}", get_client_ip(request))
+    return {"id": dim_id}
+
+
+@app.put("/api/confidence/dimensions/{dim_id}")
+def confidence_dimensions_update(dim_id: str, req: dict, request: Request):
+    import confidence_eval as ce
+    from database import get_conn
+    if "config" in req and not isinstance(req["config"], str):
+        req["config"] = json.dumps(req["config"], ensure_ascii=False)
+    n = ce.update_dimension(dim_id, req)
+    with get_conn() as conn:
+        log_operation(conn, "更新评估维度", "admin", str(request.url), f"更新评估维度:{dim_id}", get_client_ip(request))
+    return {"updated": n}
+
+
+@app.delete("/api/confidence/dimensions/{dim_id}")
+def confidence_dimensions_delete(dim_id: str, request: Request):
+    import confidence_eval as ce
+    from database import get_conn
+    n = ce.delete_dimension(dim_id)
+    with get_conn() as conn:
+        log_operation(conn, "删除评估维度", "admin", str(request.url), f"删除评估维度:{dim_id}", get_client_ip(request))
+    return {"deleted": n}
+
+
+@app.post("/api/confidence/evaluate")
+def confidence_evaluate(req: dict, request: Request):
+    """触发评估: ip_address + 可选 source_name"""
+    import confidence_eval as ce
+    from database import get_conn
+    ip = req.get("ip_address")
+    if not ip:
+        raise HTTPException(400, "缺少 ip_address")
+    results = ce.evaluate_one(ip, req.get("source_name"))
+    with get_conn() as conn:
+        log_operation(conn, "置信度评估", "admin", str(request.url), f"评估IP:{ip}", get_client_ip(request))
+    return {"results": results}
+
+
+@app.post("/api/confidence/evaluate/batch")
+def confidence_evaluate_batch(req: dict, request: Request):
+    """批量评估所有未评估的ip_subjects"""
+    import confidence_eval as ce
+    from database import get_conn
+    n = ce.evaluate_all_pending(req.get("batch_size", 500))
+    with get_conn() as conn:
+        log_operation(conn, "批量置信度评估", "admin", str(request.url), f"批量评估:{n}条", get_client_ip(request))
+    return {"evaluated": n}
+
+
+@app.get("/api/confidence/evaluations")
+def confidence_evaluations_list(
+    request: Request,
+    ip_address: str = "",
+    source_name: str = "",
+    field_name: str = "",
+    level: str = "",
+    start_time: str = "",
+    end_time: str = "",
+    page: int = 1,
+    page_size: int = 20,
+):
+    """查询评估台账: 多条件+分页"""
+    import confidence_eval as ce
+    res = ce.query_evaluations({
+        "ip_address": ip_address, "source_name": source_name, "field_name": field_name,
+        "level": level, "start_time": start_time, "end_time": end_time,
+    }, page=page, page_size=page_size)
+    return res
+
+
+@app.get("/api/confidence/evaluations/{eval_id}")
+def confidence_evaluations_detail(eval_id: str, request: Request):
+    import confidence_eval as ce
+    item = ce.get_evaluation(eval_id)
+    if not item:
+        raise HTTPException(404, "评估记录不存在")
+    return item
+
+
+@app.get("/api/confidence/distribution")
+def confidence_distribution():
+    import confidence_eval as ce
+    return {"distribution": ce.get_distribution()}
+
+
+@app.get("/api/confidence/by-ip/{ip_address}")
+def confidence_by_ip(ip_address: str, request: Request):
+    """冲突工单详情用:按IP查询所有评估记录"""
+    import confidence_eval as ce
+    return {"items": ce.list_evaluations_by_ip(ip_address)}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
