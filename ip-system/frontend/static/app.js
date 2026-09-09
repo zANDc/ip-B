@@ -46,7 +46,7 @@ const app = createApp({
             if (key === 'dashboard') loadDashboard();
             if (key === 'query-list') loadTasks(1);
             if (key === 'query-batch') { /* ready */ }
-            if (key === 'datasource') loadDataSources(1);
+            if (key === 'datasource') { loadAllTemplates(); loadDataSources(1); }
             if (key === 'template') loadTemplates(1);
             if (key === 'scene') loadScenes(1);
             if (key === 'dictionary') { loadDictionaryTypes(); loadDictionary(1); }
@@ -198,9 +198,10 @@ const app = createApp({
         };
         const resetDsQuery = () => { Object.keys(dsQuery).forEach(k => dsQuery[k] = ''); loadDataSources(1); };
         const showDsDialog = ref(false);
-        const dsForm = reactive({ id: '', name: '', source_type: '移网', authority_level: '高', owner: '', contact: '', description: '', alarm_enabled: 0, config_attrs: '{}' });
+        const dsForm = reactive({ id: '', name: '', source_type: '移网', authority_level: '高', owner: '', contact: '', description: '', alarm_enabled: 0, config_attrs: '{}', template_id: '' });
         const openDataSourceDialog = (row) => {
-            if (row) { Object.keys(dsForm).forEach(k => dsForm[k] = row[k]); } else { Object.assign(dsForm, { id: '', name: '', source_type: '移网', authority_level: '高', owner: '', contact: '', description: '', alarm_enabled: 0, config_attrs: '{}' }); }
+            if (row) { Object.keys(dsForm).forEach(k => dsForm[k] = row[k] !== undefined ? row[k] : (k==='template_id'?'':dsForm[k])); }
+            else { Object.assign(dsForm, { id: '', name: '', source_type: '移网', authority_level: '高', owner: '', contact: '', description: '', alarm_enabled: 0, config_attrs: '{}', template_id: '' }); }
             showDsDialog.value = true;
         };
         const saveDataSource = async () => {
@@ -253,9 +254,18 @@ const app = createApp({
         const templateList = ref([]);
         const tplPage = ref(1);
         const tplTotal = ref(0);
+        const allTemplates = ref([]);
         const loadTemplates = async (page) => {
             tplPage.value = page;
             try { const res = await API('/api/templates?page=' + page + '&page_size=10'); templateList.value = res.data; tplTotal.value = res.total; } catch(e) { ElMessage.error(e.message); }
+        };
+        const loadAllTemplates = async () => {
+            try { const res = await API('/api/templates?page=1&page_size=100'); allTemplates.value = res.data || []; } catch(e) { console.error(e); }
+        };
+        const tplNameOf = (tplId) => {
+            if (!tplId) return '';
+            const t = allTemplates.value.find(x => x.id === tplId);
+            return t ? t.name : '';
         };
         const showTemplateDialog = ref(false);
         const templateForm = reactive({ id: '', name: '', scene_type: '', description: '' });
@@ -555,6 +565,7 @@ const app = createApp({
             pathNodes.value = [];
             pathEdges.value = [];
             await loadAllDataSources();
+            await loadAllTemplates();
             try {
                 const res = await API('/api/scenes/' + row.id + '/paths');
                 if (res.data && res.data.length > 0) {
@@ -621,6 +632,18 @@ const app = createApp({
         };
 
         // ---- node config ----
+        const currentDsFields = ref([]);
+        const loadDsTemplateFields = async (dsId) => {
+            currentDsFields.value = [];
+            if (!dsId) return;
+            try {
+                const ds = allDataSources.value.find(d => d.id === dsId);
+                if (!ds || !ds.template_id) return;
+                const res = await API('/api/templates/' + ds.template_id);
+                if (res && res.fields) currentDsFields.value = res.fields;
+            } catch(e) { console.error(e); }
+        };
+        const onNodeDsChange = (dsId) => { loadDsTemplateFields(dsId); };
         const openNodeConfig = (nodeId, props) => {
             const p = props || {};
             const type = p.nodeType || 'execute';
@@ -630,6 +653,8 @@ const app = createApp({
             nodeConfigForm.data_source_id = p.data_source_id || '';
             nodeConfigForm.query_target = p.query_target || '';
             nodeConfigForm.condition = p.condition || '是否命中';
+            if (type === 'execute' && p.data_source_id) loadDsTemplateFields(p.data_source_id);
+            else currentDsFields.value = [];
             showNodeConfig.value = true;
         };
         const applyNodeConfig = () => {
@@ -805,7 +830,7 @@ const app = createApp({
             showTaskResultDialog, showTaskPathDialog, taskDetail, viewTaskResult, viewTaskPath, viewTaskDetail,
             batchResult, downloadTemplate, beforeBatchUpload, handleBatchUpload, viewBatchTask,
             dsQuery, dsList, dsPage, dsTotal, loadDataSources, resetDsQuery, showDsDialog, dsForm, openDataSourceDialog, saveDataSource, deleteDataSource, showDsDetailDialog, dsDetail, viewDataSource, downloadSubjectTemplate, handleSubjectImport,
-            templateList, tplPage, tplTotal, loadTemplates, showTemplateDialog, templateForm, openTemplateDialog, saveTemplate, deleteTemplate, showTemplateDetailDialog, templateDetail, viewTemplate,
+            templateList, tplPage, tplTotal, loadTemplates, allTemplates, loadAllTemplates, tplNameOf, showTemplateDialog, templateForm, openTemplateDialog, saveTemplate, deleteTemplate, showTemplateDetailDialog, templateDetail, viewTemplate,
             showFieldDialog, fieldList, currentTplId, fieldForm, openFieldDialog, resetFieldForm, openEditField, saveField, deleteField,
             sceneList, scenePage, sceneTotal, loadScenes, showSceneDialog, sceneForm, openSceneDialog, saveScene, deleteScene, toggleScene,
             showPathBuilder, allDataSources, currentSceneId, currentSceneInfo, currentPathInfo, openPathBuilder,
@@ -813,7 +838,7 @@ const app = createApp({
             onDragStart, onDrop, lfZoom, lfResetView, applyBranch,
             onPathBuilderOpened, onPathBuilderClosed,
             clearCanvas,
-            showBranchPicker, pendingLinkFrom, showNodeConfig, nodeConfigForm, openNodeConfig, applyNodeConfig,
+            showBranchPicker, pendingLinkFrom, showNodeConfig, nodeConfigForm, openNodeConfig, applyNodeConfig, currentDsFields, onNodeDsChange,
             savePath, publishPath,
             conflictQuery, conflictList, conflictPage, conflictTotal, loadConflicts, resetConflictQuery, showConflictDetailDialog, conflictDetail, conflictLifecycle, viewConflictDetail, showProcessDialog, processForm, processConflict, submitProcessConflict,
             logQuery, logList, logPage, logTotal, loadLogs, resetLogQuery,

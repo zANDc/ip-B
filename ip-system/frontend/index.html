@@ -293,6 +293,7 @@
                         <el-table :data="dsList" border stripe>
                             <el-table-column prop="name" label="数据源名称"></el-table-column>
                             <el-table-column prop="source_type" label="类型" width="80"></el-table-column>
+                            <el-table-column label="关联主体模板" width="160"><template #default="{row}">{{ tplNameOf(row.template_id) || '未关联' }}</template></el-table-column>
                             <el-table-column prop="authority_level" label="权威性" width="80"><template #default="{row}"><el-tag :type="row.authority_level==='高'?'danger':row.authority_level==='中'?'warning':'info'">{{row.authority_level}}</el-tag></template></el-table-column>
                             <el-table-column prop="owner" label="负责人" width="80"></el-table-column>
                             <el-table-column prop="contact" label="联系方式" width="120"></el-table-column>
@@ -618,10 +619,16 @@
     </el-dialog>
 
     <!-- Data Source Dialog -->
-    <el-dialog v-model="showDsDialog" :title="dsForm.id?'编辑数据源':'新增数据源'" width="600px">
+    <el-dialog v-model="showDsDialog" :title="dsForm.id?'编辑数据源':'新增数据源'" width="640px">
         <el-form :model="dsForm" label-width="120px">
             <el-form-item label="数据源名称"><el-input v-model="dsForm.name"></el-input></el-form-item>
             <el-form-item label="数据源类型"><el-select v-model="dsForm.source_type"><el-option label="移网" value="移网"/><el-option label="家宽" value="家宽"/><el-option label="专线" value="专线"/><el-option label="IDC" value="IDC"/><el-option label="自有业务" value="自有业务"/><el-option label="其他" value="其他"/></el-select></el-form-item>
+            <el-form-item label="关联主体模板">
+                <el-select v-model="dsForm.template_id" clearable placeholder="选择该数据源对应的IP主体信息模板" style="width:100%">
+                    <el-option v-for="t in allTemplates" :key="t.id" :label="t.name + ' (' + (t.scene_type||'') + ')'" :value="t.id"></el-option>
+                </el-select>
+                <span style="color:#909399;font-size:12px">联动字段：执行节点查询时按此模板字段映射</span>
+            </el-form-item>
             <el-form-item label="数据源权威性"><el-select v-model="dsForm.authority_level"><el-option label="高" value="高"/><el-option label="中" value="中"/><el-option label="低" value="低"/></el-select></el-form-item>
             <el-form-item label="负责人"><el-input v-model="dsForm.owner"></el-input></el-form-item>
             <el-form-item label="联系方式"><el-input v-model="dsForm.contact"></el-input></el-form-item>
@@ -633,10 +640,11 @@
     </el-dialog>
 
     <!-- Data Source Detail Dialog -->
-    <el-dialog v-model="showDsDetailDialog" title="数据源详情" width="600px">
+    <el-dialog v-model="showDsDetailDialog" title="数据源详情" width="640px">
         <el-descriptions v-if="dsDetail" :column="1" border>
             <el-descriptions-item label="数据源名称">{{ dsDetail.name }}</el-descriptions-item>
             <el-descriptions-item label="数据源类型">{{ dsDetail.source_type }}</el-descriptions-item>
+            <el-descriptions-item label="关联主体模板">{{ tplNameOf(dsDetail.template_id) || '未关联' }}</el-descriptions-item>
             <el-descriptions-item label="数据源权威性">{{ dsDetail.authority_level }}</el-descriptions-item>
             <el-descriptions-item label="负责人">{{ dsDetail.owner }}</el-descriptions-item>
             <el-descriptions-item label="联系方式">{{ dsDetail.contact }}</el-descriptions-item>
@@ -711,17 +719,18 @@
     </el-dialog>
 
     <!-- Visual Path Builder Dialog (LogicFlow drag-drop) -->
-    <el-dialog v-model="showPathBuilder" title="场景查询路径配置（可视化拖拽构建）" width="1150px" top="3vh" @opened="onPathBuilderOpened" @closed="onPathBuilderClosed">
+    <el-dialog v-model="showPathBuilder" title="场景查询路径配置（可视化拖拽构建）" width="1180px" top="3vh" @opened="onPathBuilderOpened" @closed="onPathBuilderClosed">
         <el-alert v-if="currentSceneInfo" :title="`场景: ${currentSceneInfo.name}（${currentSceneInfo.scene_type}）— 拖拽组件到画布编排查询流程: 哪类数据去哪个数据源查、判断什么后走哪条分支`" type="info" :closable="false" style="margin-bottom:10px"></el-alert>
         <div class="pb-toolbar">
-            <div class="pb-drag-item" draggable="true" @dragstart="onDragStart($event,'start')"><el-icon><Flag/></el-icon>开始节点</div>
-            <div class="pb-drag-item" draggable="true" @dragstart="onDragStart($event,'execute')"><el-icon><Cpu/></el-icon>执行节点</div>
-            <div class="pb-drag-item" draggable="true" @dragstart="onDragStart($event,'judge')"><el-icon><Switch/></el-icon>判断节点</div>
-            <el-button size="small" @click="lfZoom(true)">放大</el-button>
-            <el-button size="small" @click="lfZoom(false)">缩小</el-button>
-            <el-button size="small" @click="lfResetView">重置视图</el-button>
-            <el-button size="small" type="danger" @click="clearCanvas">清空画布</el-button>
-            <el-tag size="small" type="info">拖入组件 · 拖拽锚点连线 · 双击配置 · 右键删除</el-tag>
+            <div class="pb-drag-item pb-drag-start" draggable="true" @dragstart="onDragStart($event,'start')"><el-icon><Flag/></el-icon>开始节点</div>
+            <div class="pb-drag-item pb-drag-execute" draggable="true" @dragstart="onDragStart($event,'execute')"><el-icon><Cpu/></el-icon>执行节点</div>
+            <div class="pb-drag-item pb-drag-judge" draggable="true" @dragstart="onDragStart($event,'judge')"><el-icon><Switch/></el-icon>判断节点</div>
+            <div class="pb-divider"></div>
+            <el-button size="small" @click="lfZoom(true)"><el-icon><ZoomIn/></el-icon>放大</el-button>
+            <el-button size="small" @click="lfZoom(false)"><el-icon><ZoomOut/></el-icon>缩小</el-button>
+            <el-button size="small" @click="lfResetView"><el-icon><Aim/></el-icon>居中</el-button>
+            <el-button size="small" type="danger" @click="clearCanvas"><el-icon><Delete/></el-icon>清空</el-button>
+            <span class="pb-tip">拖入组件 · 拖拽锚点连线 · 双击配置 · 右键删除</span>
         </div>
         <div class="path-canvas" ref="pathCanvas" @drop.prevent="onDrop" @dragover.prevent @contextmenu.prevent></div>
         <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -747,16 +756,22 @@
     </el-dialog>
 
     <!-- Node Config Dialog -->
-    <el-dialog v-model="showNodeConfig" :title="'节点配置 - ' + (nodeConfigForm.type==='start'?'开始节点':nodeConfigForm.type==='judge'?'判断节点':'执行节点')" width="500px">
-        <el-form :model="nodeConfigForm" label-width="100px">
+    <el-dialog v-model="showNodeConfig" :title="'节点配置 - ' + (nodeConfigForm.type==='start'?'开始节点':nodeConfigForm.type==='judge'?'判断节点':'执行节点')" width="620px">
+        <el-form :model="nodeConfigForm" label-width="110px">
             <el-form-item label="节点名称"><el-input v-model="nodeConfigForm.name"></el-input></el-form-item>
             <template v-if="nodeConfigForm.type==='execute'">
                 <el-form-item label="查询数据源">
-                    <el-select v-model="nodeConfigForm.data_source_id" placeholder="选择该节点查询的数据源(留空则为结束/返回节点)" clearable style="width:100%">
+                    <el-select v-model="nodeConfigForm.data_source_id" placeholder="选择该节点查询的数据源(留空则为结束/返回节点)" clearable style="width:100%" @change="onNodeDsChange">
                         <el-option v-for="ds in allDataSources" :key="ds.id" :label="ds.name + ' (' + ds.source_type + ')'" :value="ds.id"/>
                     </el-select>
                 </el-form-item>
                 <el-form-item label="查询目标"><el-input v-model="nodeConfigForm.query_target" placeholder="如: 移网IP主体信息(留空默认)"></el-input></el-form-item>
+                <el-form-item v-if="currentDsFields.length" label="联动模板字段">
+                    <div class="tpl-fields-box">
+                        <span v-for="f in currentDsFields" :key="f.id" class="field-item" :class="{sensitive: f.is_sensitive}">{{ f.field_label }}</span>
+                    </div>
+                    <span style="color:#909399;font-size:12px;display:block;margin-top:4px">红色为敏感字段；该数据源关联主体模板的字段定义</span>
+                </el-form-item>
             </template>
             <template v-if="nodeConfigForm.type==='judge'">
                 <el-form-item label="判断条件">

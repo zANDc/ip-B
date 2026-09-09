@@ -24,11 +24,61 @@ body { font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans G
 .stat-num { font-size: 28px; font-weight: bold; color: #303133; }
 .stat-label { font-size: 14px; color: #909399; }
 
-/* Path Builder (LogicFlow) */
-.pb-toolbar { margin-bottom: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.pb-drag-item { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border: 1px dashed #409EFF; border-radius: 4px; color: #409EFF; font-size: 13px; cursor: grab; background: #ecf5ff; user-select: none; }
-.pb-drag-item:hover { background: #d9ecff; }
-.path-canvas { width: 100%; height: 480px; background: #f5f7fa; border: 2px dashed #dcdfe6; position: relative; overflow: hidden; }
+/* Path Builder (LogicFlow) - 现代化卡片式工具栏 */
+.pb-toolbar {
+    margin-bottom: 12px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    background: linear-gradient(135deg, #f8fbff 0%, #eef4ff 100%);
+    border: 1px solid #d8e4ff;
+    border-radius: 8px;
+}
+.pb-drag-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: grab;
+    user-select: none;
+    box-shadow: 0 2px 6px rgba(64,158,255,0.18);
+    transition: all 0.2s ease;
+}
+.pb-drag-item:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(64,158,255,0.28); }
+.pb-drag-item:active { cursor: grabbing; transform: translateY(0); }
+.pb-drag-start { background: linear-gradient(135deg, #409EFF 0%, #337ecc 100%); }
+.pb-drag-start:hover { background: linear-gradient(135deg, #5a8fee 0%, #409EFF 100%); }
+.pb-drag-execute { background: linear-gradient(135deg, #67C23A 0%, #529b2e 100%); }
+.pb-drag-execute:hover { background: linear-gradient(135deg, #7ed14f 0%, #67C23A 100%); }
+.pb-drag-judge { background: linear-gradient(135deg, #E6A23C 0%, #b88230 100%); }
+.pb-drag-judge:hover { background: linear-gradient(135deg, #f0b558 0%, #E6A23C 100%); }
+.pb-divider { width: 1px; height: 24px; background: #d8e4ff; margin: 0 4px; }
+.pb-tip { color: #909399; font-size: 12px; }
+.path-canvas {
+    width: 100%;
+    height: 520px;
+    background: #fbfcff;
+    background-image: radial-gradient(circle, #dcdfe6 1.1px, transparent 1.1px);
+    background-size: 18px 18px;
+    border: 1px solid #e4e7ed;
+    border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: inset 0 1px 4px rgba(0,0,0,0.04);
+}
+/* LogicFlow 节点 hover 高亮 */
+.lf-node-not-specified:hover { filter: drop-shadow(0 4px 10px rgba(64,158,255,0.25)); }
+/* 模板字段映射卡片 */
+.tpl-fields-box { max-height: 220px; overflow-y: auto; border: 1px solid #ebeef5; border-radius: 6px; padding: 6px; background: #fafbfc; }
+.tpl-fields-box .field-item { display: inline-block; margin: 3px; padding: 2px 8px; background: #ecf5ff; color: #409EFF; border-radius: 10px; font-size: 12px; }
+.tpl-fields-box .field-item.sensitive { background: #fef0f0; color: #F56C6C; }
 
 /* Path replay (read-only diagram of the executed configured scene path) */
 .replay-box { margin-top: 5px; }

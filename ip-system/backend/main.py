@@ -682,6 +682,7 @@ class DataSourceRequest(BaseModel):
     description: str = ""
     alarm_enabled: int = 0
     config_attrs: str = "{}"
+    template_id: str = ""
 
 
 @app.get("/api/datasources")
@@ -710,8 +711,8 @@ def create_datasource(req: DataSourceRequest, request: Request):
     with get_conn() as conn:
         ds_id = gen_id("ds_")
         conn.execute(
-            "INSERT INTO data_sources (id, name, source_type, authority_level, owner, contact, description, alarm_enabled, config_attrs, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (ds_id, req.name, req.source_type, req.authority_level, req.owner, req.contact, req.description, req.alarm_enabled, req.config_attrs, "active", now_str(), now_str()),
+            "INSERT INTO data_sources (id, name, source_type, authority_level, owner, contact, description, alarm_enabled, config_attrs, template_id, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (ds_id, req.name, req.source_type, req.authority_level, req.owner, req.contact, req.description, req.alarm_enabled, req.config_attrs, req.template_id or None, "active", now_str(), now_str()),
         )
         log_operation(conn, "新增", "admin", str(request.url), f"新增数据源:{req.name}", get_client_ip(request))
         return {"id": ds_id, "message": "数据源新增成功"}
@@ -721,8 +722,8 @@ def create_datasource(req: DataSourceRequest, request: Request):
 def update_datasource(ds_id: str, req: DataSourceRequest, request: Request):
     with get_conn() as conn:
         conn.execute(
-            "UPDATE data_sources SET name=?, source_type=?, authority_level=?, owner=?, contact=?, description=?, alarm_enabled=?, config_attrs=?, updated_at=? WHERE id=?",
-            (req.name, req.source_type, req.authority_level, req.owner, req.contact, req.description, req.alarm_enabled, req.config_attrs, now_str(), ds_id),
+            "UPDATE data_sources SET name=?, source_type=?, authority_level=?, owner=?, contact=?, description=?, alarm_enabled=?, config_attrs=?, template_id=?, updated_at=? WHERE id=?",
+            (req.name, req.source_type, req.authority_level, req.owner, req.contact, req.description, req.alarm_enabled, req.config_attrs, req.template_id or None, now_str(), ds_id),
         )
         log_operation(conn, "编辑", "admin", str(request.url), f"编辑数据源:{req.name}", get_client_ip(request))
         return {"message": "数据源更新成功"}
