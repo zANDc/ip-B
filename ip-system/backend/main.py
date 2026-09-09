@@ -854,6 +854,7 @@ class SceneRequest(BaseModel):
     scene_type: str
     ip_range: str = ""
     description: str = ""
+    datasource_ids: str = ""  # 逗号分隔的数据源ID列表
 
 
 @app.get("/api/scenes")
@@ -876,6 +877,13 @@ def list_scenes(request: Request, page: int = 1, page_size: int = 10, name: Opti
         scenes = parse_list(conn.execute(sql, params).fetchall())
         for s in scenes:
             s["paths"] = parse_list(conn.execute("SELECT * FROM scene_paths WHERE scene_id=?", (s["id"],)).fetchall())
+            # 关联数据源列表
+            ds_links = conn.execute(
+                "SELECT ds.id, ds.name, ds.source_type, ds.template_id, t.name as template_name FROM scene_datasources sd JOIN data_sources ds ON sd.datasource_id=ds.id LEFT JOIN subject_templates t ON ds.template_id=t.id WHERE sd.scene_id=?",
+                (s["id"],),
+            ).fetchall()
+            s["datasources"] = parse_list(ds_links)
+            s["datasource_ids"] = [d["id"] for d in s["datasources"]]
         return {"total": total, "page": page, "page_size": page_size, "data": scenes}
 
 
@@ -887,6 +895,13 @@ def create_scene(req: SceneRequest, request: Request):
             "INSERT INTO scenes (id, name, scene_type, ip_range, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
             (sid, req.name, req.scene_type, req.ip_range, req.description, "enabled", now_str(), now_str()),
         )
+        # 维护场景-数据源关联
+        if req.datasource_ids:
+            for ds_id in [x.strip() for x in req.datasource_ids.split(",") if x.strip()]:
+                try:
+                    conn.execute("INSERT OR IGNORE INTO scene_datasources (id, scene_id, datasource_id, created_at) VALUES (?,?,?,?)", (gen_id("sd_"), sid, ds_id, now_str()))
+                except Exception:
+                    pass
         log_operation(conn, "新增", "admin", str(request.url), f"新增场景:{req.name}", get_client_ip(request))
         return {"id": sid, "message": "场景创建成功"}
 
@@ -895,6 +910,14 @@ def create_scene(req: SceneRequest, request: Request):
 def update_scene(scene_id: str, req: SceneRequest, request: Request):
     with get_conn() as conn:
         conn.execute("UPDATE scenes SET name=?, scene_type=?, ip_range=?, description=?, updated_at=? WHERE id=?", (req.name, req.scene_type, req.ip_range, req.description, now_str(), scene_id))
+        # 重建场景-数据源关联
+        conn.execute("DELETE FROM scene_datasources WHERE scene_id=?", (scene_id,))
+        if req.datasource_ids:
+            for ds_id in [x.strip() for x in req.datasource_ids.split(",") if x.strip()]:
+                try:
+                    conn.execute("INSERT OR IGNORE INTO scene_datasources (id, scene_id, datasource_id, created_at) VALUES (?,?,?,?)", (gen_id("sd_"), scene_id, ds_id, now_str()))
+                except Exception:
+                    pass
         log_operation(conn, "编辑", "admin", str(request.url), f"编辑场景:{req.name}", get_client_ip(request))
         return {"message": "场景更新成功"}
 
@@ -1818,11 +1841,29 @@ def enrich_results_with_dictionary(conn, results):
         else:
             auth_score = 0.60
 
-        # 2) Completeness weight (30%): ratio of non-empty meaningful fields
-        skip_cols = {"id", "created_at", "raw_data", "ip_version", "scene_type"}
-        meaningful_keys = [k for k in rd.keys() if k not in skip_cols]
-        non_empty = sum(1 for k in meaningful_keys if rd.get(k) not in (None, "", "-"))
-        comp_score = (non_empty / len(meaningful_keys)) if meaningful_keys else 0.0
+        # 2) Completeness weight (30%): ratio of non-empty fields defined in the subject template
+        #    Use template fields when available so the score reflects real data shape
+        tpl_id = rd.get("template_id")
+        tpl_fields = []
+        if tpl_id:
+            tpl_fields = [r["field_name"] for r in conn.execute(
+                "SELECT field_name FROM subject_template_fields WHERE template_id=? ORDER BY field_order",
+                (tpl_id,)
+            ).fetchall()]
+        if tpl_fields:
+            # Use template-defined fields: count how many are filled in the result row
+            filled = sum(1 for f in tpl_fields if rd.get(f) not in (None, "", "-"))
+            total_fields = len(tpl_fields)
+            comp_score = (filled / total_fields) if total_fields else 0.0
+            non_empty = filled
+            total_meaningful = total_fields
+        else:
+            # Fallback: all columns except system columns
+            skip_cols = {"id", "created_at", "raw_data", "ip_version", "scene_type", "template_id"}
+            meaningful_keys = [k for k in rd.keys() if k not in skip_cols]
+            non_empty = sum(1 for k in meaningful_keys if rd.get(k) not in (None, "", "-"))
+            total_meaningful = len(meaningful_keys)
+            comp_score = (non_empty / total_meaningful) if total_meaningful else 0.0
 
         # 3) Freshness weight (20%): based on start_time recency
         fresh_score = 0.4
@@ -1854,7 +1895,7 @@ def enrich_results_with_dictionary(conn, results):
         rd["confidence"] = confidence
         rd["confidence_detail"] = {
             "authority": {"score": round(auth_score * 100, 1), "level": auth or "未知", "weight": "50%"},
-            "completeness": {"score": round(comp_score * 100, 1), "filled": non_empty, "total": len(meaningful_keys), "weight": "30%"},
+            "completeness": {"score": round(comp_score * 100, 1), "filled": non_empty, "total": total_meaningful, "weight": "30%"},
             "freshness": {"score": round(fresh_score * 100, 1), "days": (now - dt).days if dt else None, "weight": "20%"},
         }
         rd["confidence_label"] = (

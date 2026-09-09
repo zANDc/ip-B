@@ -48,7 +48,7 @@ const app = createApp({
             if (key === 'query-batch') { /* ready */ }
             if (key === 'datasource') { loadAllTemplates(); loadDataSources(1); }
             if (key === 'template') loadTemplates(1);
-            if (key === 'scene') loadScenes(1);
+            if (key === 'scene') { loadAllDataSources(); loadScenes(1); }
             if (key === 'dictionary') { loadDictionaryTypes(); loadDictionary(1); }
             if (key === 'conflict') loadConflicts(1);
             if (key === 'log') loadLogs(1);
@@ -324,16 +324,18 @@ const app = createApp({
             try { const res = await API('/api/scenes?page=' + page + '&page_size=10'); sceneList.value = res.data; sceneTotal.value = res.total; } catch(e) { ElMessage.error(e.message); }
         };
         const showSceneDialog = ref(false);
-        const sceneForm = reactive({ id: '', name: '', scene_type: '', ip_range: '', description: '' });
+        const sceneForm = reactive({ id: '', name: '', scene_type: '', ip_range: '', description: '', datasource_ids_arr: [] });
         const openSceneDialog = (row) => {
-            if (row) { Object.assign(sceneForm, { id: row.id, name: row.name, scene_type: row.scene_type, ip_range: row.ip_range, description: row.description }); }
-            else { Object.assign(sceneForm, { id: '', name: '', scene_type: '', ip_range: '', description: '' }); }
+            if (row) { Object.assign(sceneForm, { id: row.id, name: row.name, scene_type: row.scene_type, ip_range: row.ip_range, description: row.description, datasource_ids_arr: row.datasource_ids ? [...row.datasource_ids] : [] }); }
+            else { Object.assign(sceneForm, { id: '', name: '', scene_type: '', ip_range: '', description: '', datasource_ids_arr: [] }); }
             showSceneDialog.value = true;
         };
         const saveScene = async () => {
             try {
-                if (sceneForm.id) { await API('/api/scenes/' + sceneForm.id, { method: 'PUT', body: sceneForm }); }
-                else { await API('/api/scenes', { method: 'POST', body: sceneForm }); }
+                const payload = { ...sceneForm, datasource_ids: (sceneForm.datasource_ids_arr || []).join(',') };
+                delete payload.datasource_ids_arr;
+                if (sceneForm.id) { await API('/api/scenes/' + sceneForm.id, { method: 'PUT', body: payload }); }
+                else { await API('/api/scenes', { method: 'POST', body: payload }); }
                 ElMessage.success('保存成功'); showSceneDialog.value = false; loadScenes(scenePage.value);
             } catch(e) { ElMessage.error(e.message); }
         };
