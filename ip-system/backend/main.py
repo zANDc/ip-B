@@ -95,12 +95,32 @@ def ip_in_cidr(ip, cidr):
 
 
 def detect_scene_by_ip(conn, ip):
-    """Auto-detect scene type by matching IP against configured scene IP ranges."""
+    """Auto-detect scene type by matching IP against configured scene IP ranges.
+
+    When multiple scenes match, the most specific (longest prefix) CIDR wins,
+    so e.g. 10.2.0.1 matches 家宽 (10.2.0.0/16) over 移网 (10.0.0.0/8).
+    """
+    import ipaddress
     scenes = conn.execute("SELECT scene_type, ip_range FROM scenes WHERE status='enabled' AND ip_range IS NOT NULL AND ip_range != ''").fetchall()
+    best_match = None
+    best_prefix = -1
     for s in scenes:
-        if s["ip_range"] and ip_in_cidr(ip, s["ip_range"]):
-            return s["scene_type"]
-    return None
+        if not s["ip_range"]:
+            continue
+        for segment in s["ip_range"].split(","):
+            segment = segment.strip()
+            if not segment or "/" not in segment:
+                continue
+            try:
+                net = ipaddress.ip_network(segment, strict=False)
+                if ipaddress.ip_address(ip) in net:
+                    prefix_len = net.prefixlen
+                    if prefix_len > best_prefix:
+                        best_prefix = prefix_len
+                        best_match = s["scene_type"]
+            except ValueError:
+                continue
+    return best_match
 
 
 def execute_scene_path(conn, nodes, edges, ip, req):
@@ -317,11 +337,8 @@ def create_query_task(req: QueryTaskRequest, request: Request):
 
         log_operation(conn, "查询", "admin", str(request.url), f"创建IP查询任务: {ip} (场景:{scene_type or '未识别'}, 路径:{path_snapshot['name'] if path_snapshot else '默认流程'})", get_client_ip(request))
 
-        # Mask sensitive fields in results
-        masked_results = []
-        for r in results:
-            rd = dict(r)
-            masked_results.append(rd)
+        # Enrich results with data-dictionary translations (CITY_ID -> CITY_NAME)
+        masked_results = enrich_results_with_dictionary(conn, results)
 
         return {
             "task_id": task_id,
@@ -359,7 +376,7 @@ def get_task_detail(task_id: str, request: Request):
         paths = conn.execute("SELECT * FROM task_paths WHERE task_id=? ORDER BY rowid", (task_id,)).fetchall()
         return {
             "task": dict(task),
-            "results": parse_list(results),
+            "results": enrich_results_with_dictionary(conn, results),
             "path": parse_path_snapshot(task),
             "paths": parse_list(paths),
         }
@@ -451,7 +468,7 @@ def get_location_detail(task_id: str, request: Request):
                 "scene_type": rd["scene_type"],
             }
             details.append(detail)
-        return {"task": dict(task), "details": details, "results": parse_list(results)}
+        return {"task": dict(task), "details": details, "results": enrich_results_with_dictionary(conn, results)}
 
 
 # 1.3 Batch import IP query
@@ -1340,16 +1357,22 @@ def export_subjects(request: Request, ip_address: Optional[str] = None, scene_ty
             sql += " AND scene_type=?"
             params.append(scene_type)
         rows = conn.execute(sql + " ORDER BY created_at DESC", params).fetchall()
+        # Enrich rows with CITY_NAME translation via the data dictionary
+        enriched_rows = enrich_results_with_dictionary(conn, rows)
         wb = Workbook()
         ws = wb.active
         ws.title = "IP主体信息"
-        headers = ["IP地址", "IP版本", "场景类型", "端口", "用户名", "电话", "地址", "单位名称", "数据源", "位置", "接入节点", "IP类型", "开始时间", "结束时间"]
+        headers = ["IP地址", "IP版本", "场景类型", "端口", "用户名", "电话", "地址", "单位名称", "数据源", "位置", "接入节点", "IP类型", "开始时间", "结束时间", "城市编码", "城市名称", "数据源子类型"]
         _style_header(ws, headers)
-        for r_idx, r in enumerate(rows, 2):
-            vals = [r["ip_address"], r["ip_version"], r["scene_type"], r["port"], r["user_name"], r["phone"], r["address"], r["unit_name"], r["data_source"], r["location"], r["access_node"], r["ip_type"], r["start_time"], r["end_time"]]
+        for r_idx, r in enumerate(enriched_rows, 2):
+            vals = [r.get("ip_address"), r.get("ip_version"), r.get("scene_type"), r.get("port"),
+                    r.get("user_name"), r.get("phone"), r.get("address"), r.get("unit_name"),
+                    r.get("data_source"), r.get("location"), r.get("access_node"), r.get("ip_type"),
+                    r.get("start_time"), r.get("end_time"), r.get("city_id"), r.get("city_name"),
+                    r.get("source_subtype")]
             for c_idx, v in enumerate(vals, 1):
                 ws.cell(row=r_idx, column=c_idx, value=v if v else "")
-        widths = [16, 8, 10, 8, 14, 14, 20, 16, 16, 14, 14, 10, 20, 20]
+        widths = [16, 8, 10, 8, 14, 14, 20, 16, 16, 14, 14, 10, 20, 20, 10, 12, 12]
         for i, w in enumerate(widths, 1):
             ws.column_dimensions[chr(64 + i)].width = w
         log_operation(conn, "导出", "admin", str(request.url), f"导出IP主体信息{len(rows)}条", get_client_ip(request))
@@ -1609,6 +1632,162 @@ def delete_ip_access(rule_id: str, request: Request):
         return {"message": "IP访问规则删除成功"}
 
 
+# ============ Data Dictionary (CITY_ID → CITY_NAME etc.) ============
+class DictionaryEntryRequest(BaseModel):
+    dict_type: str
+    dict_code: str
+    dict_name: str
+    description: Optional[str] = ""
+    status: Optional[str] = "active"
+
+
+@app.get("/api/dictionary")
+def list_dictionary(
+    request: Request,
+    dict_type: Optional[str] = None,
+    dict_code: Optional[str] = None,
+    keyword: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+):
+    """List data dictionary entries with optional filtering."""
+    with get_conn() as conn:
+        sql = "SELECT * FROM data_dictionary WHERE 1=1"
+        params = []
+        if dict_type:
+            sql += " AND dict_type=?"
+            params.append(dict_type)
+        if dict_code:
+            sql += " AND dict_code=?"
+            params.append(dict_code)
+        if keyword:
+            sql += " AND (dict_code LIKE ? OR dict_name LIKE ? OR description LIKE ?)"
+            params += [f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"]
+        total = conn.execute(f"SELECT COUNT(*) as c FROM ({sql})", params).fetchone()["c"]
+        sql += " ORDER BY dict_type, CAST(dict_code AS INTEGER) LIMIT ? OFFSET ?"
+        params += [page_size, (page - 1) * page_size]
+        rows = conn.execute(sql, params).fetchall()
+        return {"total": total, "page": page, "page_size": page_size, "data": parse_list(rows)}
+
+
+@app.get("/api/dictionary/types")
+def list_dictionary_types(request: Request):
+    """List all distinct dict_type values with their entry counts."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT dict_type, COUNT(*) as count FROM data_dictionary GROUP BY dict_type ORDER BY dict_type"
+        ).fetchall()
+        return {"data": parse_list(rows)}
+
+
+@app.post("/api/dictionary")
+def create_dictionary_entry(req: DictionaryEntryRequest, request: Request):
+    """Create a new data dictionary entry."""
+    with get_conn() as conn:
+        # Check for uniqueness of (dict_type, dict_code)
+        existing = conn.execute(
+            "SELECT id FROM data_dictionary WHERE dict_type=? AND dict_code=?",
+            (req.dict_type, req.dict_code),
+        ).fetchone()
+        if existing:
+            raise HTTPException(400, f"字典类型[{req.dict_type}]下编码[{req.dict_code}]已存在")
+        entry_id = gen_id("dd_")
+        conn.execute(
+            "INSERT INTO data_dictionary (id, dict_type, dict_code, dict_name, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            (entry_id, req.dict_type, req.dict_code, req.dict_name, req.description or "", req.status or "active", now_str(), now_str()),
+        )
+        log_operation(conn, "数据字典", "admin", str(request.url),
+                      f"新增字典: {req.dict_type}/{req.dict_code}={req.dict_name}", get_client_ip(request))
+        return {"id": entry_id, "message": "字典条目创建成功"}
+
+
+@app.put("/api/dictionary/{entry_id}")
+def update_dictionary_entry(entry_id: str, req: DictionaryEntryRequest, request: Request):
+    """Update an existing data dictionary entry."""
+    with get_conn() as conn:
+        existing = conn.execute("SELECT * FROM data_dictionary WHERE id=?", (entry_id,)).fetchone()
+        if not existing:
+            raise HTTPException(404, "字典条目不存在")
+        # Check uniqueness if dict_type/dict_code changed
+        dup = conn.execute(
+            "SELECT id FROM data_dictionary WHERE dict_type=? AND dict_code=? AND id<>?",
+            (req.dict_type, req.dict_code, entry_id),
+        ).fetchone()
+        if dup:
+            raise HTTPException(400, f"字典类型[{req.dict_type}]下编码[{req.dict_code}]已存在")
+        conn.execute(
+            "UPDATE data_dictionary SET dict_type=?, dict_code=?, dict_name=?, description=?, status=?, updated_at=? WHERE id=?",
+            (req.dict_type, req.dict_code, req.dict_name, req.description or "", req.status or "active", now_str(), entry_id),
+        )
+        log_operation(conn, "数据字典", "admin", str(request.url),
+                      f"修改字典: {req.dict_type}/{req.dict_code}={req.dict_name}", get_client_ip(request))
+        return {"message": "字典条目更新成功"}
+
+
+@app.delete("/api/dictionary/{entry_id}")
+def delete_dictionary_entry(entry_id: str, request: Request):
+    """Delete a data dictionary entry."""
+    with get_conn() as conn:
+        existing = conn.execute("SELECT dict_type, dict_code, dict_name FROM data_dictionary WHERE id=?", (entry_id,)).fetchone()
+        if not existing:
+            raise HTTPException(404, "字典条目不存在")
+        conn.execute("DELETE FROM data_dictionary WHERE id=?", (entry_id,))
+        log_operation(conn, "数据字典", "admin", str(request.url),
+                      f"删除字典: {existing['dict_type']}/{existing['dict_code']}={existing['dict_name']}", get_client_ip(request))
+        return {"message": "字典条目删除成功"}
+
+
+@app.get("/api/dictionary/translate")
+def translate_code(
+    request: Request,
+    dict_type: str,
+    dict_code: str,
+):
+    """Translate a code to its name via the data dictionary (e.g. CITY_ID=6 -> 合肥市)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT dict_name FROM data_dictionary WHERE dict_type=? AND dict_code=? AND status='active'",
+            (dict_type, dict_code),
+        ).fetchone()
+        return {"dict_type": dict_type, "dict_code": dict_code, "dict_name": row["dict_name"] if row else None}
+
+
+def enrich_results_with_dictionary(conn, results):
+    """Add translated CITY_NAME (and other dict-derived fields) to each result dict.
+
+    Iterates over a list of sqlite3.Row/dict and enriches each row with
+    additional fields derived from the data dictionary (CITY_ID -> CITY_NAME).
+    Returns a new list of plain dicts (does not mutate input).
+    """
+    if not results:
+        return []
+    # Collect unique city codes from results to minimize dictionary lookups
+    city_codes = set()
+    for r in results:
+        rd = dict(r) if not isinstance(r, dict) else r
+        if rd.get("city_id"):
+            city_codes.add(str(rd["city_id"]))
+    # Cache translation lookups
+    city_map = {}
+    if city_codes:
+        placeholders = ",".join(["?"] * len(city_codes))
+        rows = conn.execute(
+            f"SELECT dict_code, dict_name FROM data_dictionary WHERE dict_type='CITY' AND dict_code IN ({placeholders})",
+            list(city_codes),
+        ).fetchall()
+        city_map = {row["dict_code"]: row["dict_name"] for row in rows}
+    enriched = []
+    for r in results:
+        rd = dict(r) if not isinstance(r, dict) else dict(r)
+        cid = str(rd.get("city_id") or "")
+        rd["city_name"] = city_map.get(cid, "") if cid else ""
+        # Auto-fill location field if empty but we know the city name
+        if not rd.get("location") and rd.get("city_name"):
+            rd["location"] = rd["city_name"]
+        enriched.append(rd)
+    return enriched
+
+
 # ============ Dashboard/Stats ============
 @app.get("/api/dashboard/stats")
 def dashboard_stats(request: Request):
@@ -1621,6 +1800,8 @@ def dashboard_stats(request: Request):
             "ip_subject_count": conn.execute("SELECT COUNT(*) as c FROM ip_subjects").fetchone()["c"],
             "scene_count": conn.execute("SELECT COUNT(*) as c FROM scenes").fetchone()["c"],
             "template_count": conn.execute("SELECT COUNT(*) as c FROM subject_templates").fetchone()["c"],
+            "dictionary_count": conn.execute("SELECT COUNT(*) as c FROM data_dictionary").fetchone()["c"],
+            "real_subject_count": conn.execute("SELECT COUNT(*) as c FROM ip_subjects WHERE source_subtype IS NOT NULL").fetchone()["c"],
         }
 
 

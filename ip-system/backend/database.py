@@ -153,7 +153,121 @@ CREATE TABLE IF NOT EXISTS ip_subjects (
     access_node TEXT,
     create_time TEXT,
     raw_data TEXT,            -- 完整原始数据JSON
-    created_at TEXT
+    created_at TEXT,
+    -- 数据源真实字段(四类数据源扩展)
+    source_subtype TEXT,       -- 数据源子类型: 家宽/信安/移网/综资
+    subscriber_id TEXT,        -- 用户标识: 家宽SUBSCRIBERID/移网用户永久标识
+    city_id TEXT,             -- 城市编码(用于数据字典翻译CITY_ID→CITY_NAME)
+    ipv4_address TEXT,         -- IPv4地址(数据源原始IPV4ADDRESS)
+    ipv6_address TEXT,         -- IPv6地址(数据源原始IPV6ADDRESS)
+    nat_begin_port TEXT,      -- NAT起始端口(家宽)
+    nat_end_port TEXT,        -- NAT终止端口(家宽)
+    isp_license TEXT,         -- IDC/ISP许可证号(信安)
+    unit_attr TEXT,           -- 单位属性(信安)
+    cert_type TEXT,           -- 证件类型(信安/综资)
+    cert_no TEXT,             -- 证件号码(信安/综资)
+    postal_code TEXT,         -- 邮政编码(信安)
+    register_time TEXT,       -- 注册时间(信安)
+    service_open_time TEXT,   -- 服务开通时间(信安/综资变更时间)
+    unit_address TEXT,        -- 单位地址(信安)
+    security_person_name TEXT,    -- 网络信息安全责任人姓名(信安)
+    security_person_cert_type TEXT,
+    security_person_cert_no TEXT,
+    security_person_phone TEXT,    -- 固定电话(信安)
+    security_person_mobile TEXT,  -- 移动电话(信安)
+    security_person_email TEXT,   -- 邮箱(信安)
+    user_remark TEXT,         -- 用户备注信息(信安)
+    machine_room TEXT,       -- 所属机房(信安/综资)
+    machine_room_area TEXT,  -- 机房区域名称(信安)
+    rack_name TEXT,          -- 机柜名称(信安)
+    resource_alloc_time TEXT, -- 资源分配时间(信安)
+    ip_type_code TEXT,       -- IP类型编码(信安 0=...)
+    public_ip_start TEXT,    -- 外网起始IP(信安)
+    public_ip_end TEXT,      -- 外网终止IP(信安)
+    network_bandwidth TEXT,  -- 网络带宽(信安)
+    region_code TEXT,        -- 所属区域编码(信安)
+    app_service_type TEXT,   -- 应用服务类型(信安)
+    business_type TEXT,      -- 业务类型(信安/移网/综资)
+    link_info TEXT,          -- 用户使用链路信息(信安)
+    -- 移网扩展字段
+    public_user_id TEXT,     -- 通用公共用户标识(移网)
+    permanent_device_id TEXT, -- 永久设备标识(移网)
+    user_private_ip TEXT,    -- 用户私网IP地址(移网)
+    source_public_ip TEXT,   -- 源公网IP地址(移网)
+    private_port TEXT,       -- 私网端口号(移网)
+    source_port TEXT,        -- 源端口号(移网)
+    dest_ip TEXT,            -- 目的IP地址(移网)
+    dest_port TEXT,          -- 目的端口号(移网)
+    transport_protocol TEXT, -- 数据传输协议(移网)
+    user_url TEXT,           -- 用户访问URL(移网)
+    access_location TEXT,    -- 接入位置(移网)
+    login_cell_id TEXT,      -- 登录小区号(移网)
+    logout_cell_id TEXT,     -- 下线小区号(移网)
+    base_station_id TEXT,   -- 基站标识(移网)
+    visit_network_id TEXT,  -- 拜访网络标识(移网)
+    network_type TEXT,       -- 网络类型(移网)
+    roam_flag TEXT,          -- 用户漫游标志(移网)
+    slice_id TEXT,           -- 网络切片选择辅助标识(移网)
+    visit_duration TEXT,     -- 访问时长(移网)
+    send_bytes TEXT,         -- 发送字节数(移网)
+    recv_bytes TEXT,         -- 接收字节数(移网)
+    send_packets TEXT,       -- 发送包数(移网)
+    recv_packets TEXT,       -- 接收包数(移网)
+    pdu_session_id TEXT,     -- PDU会话标识(移网)
+    nat_device_id TEXT,      -- NAT设备标识(移网)
+    operator_id TEXT,        -- 运营商标识(移网)
+    access_mode_5g TEXT,     -- 5GSA/NSA接入标识(移网)
+    dnn TEXT,                -- DNN(移网)
+    collector_left_ip TEXT,  -- 采集点左侧网元IP(移网)
+    collector_right_ip TEXT, -- 采集点右侧网元IP(移网)
+    protocol_type TEXT,      -- 协议类型(移网)
+    http_method TEXT,        -- http请求类型(移网)
+    home_id TEXT,            -- 归属地标识(移网)
+    link_access_id TEXT,     -- 链接访问标识(移网)
+    vpn_id TEXT,             -- VPN标识(移网)
+    location_type TEXT,      -- 位置区类型(移网)
+    location_id TEXT,       -- 位置区标识(移网)
+    ext_field TEXT,          -- 扩展字段(移网)
+    -- 综资扩展字段
+    is_pro_company TEXT,     -- 是否是专业公司(综资)
+    pro_company_name TEXT,   -- 专业公司名称(综资)
+    unit_category TEXT,      -- 单位所属分类(综资)
+    unit_nature TEXT,        -- 单位性质(综资)
+    unit_admin_level TEXT,   -- 单位行政级别(综资)
+    unit_industry TEXT,      -- 单位所属行业分类(综资)
+    contact_person_client TEXT,    -- 联系人姓名-客户侧(综资)
+    contact_phone_client TEXT,     -- 联系人电话-客户侧(综资)
+    contact_email_client TEXT,     -- 联系人邮箱-客户侧(综资)
+    gateway_location TEXT,   -- 网关物理位置(综资)
+    use_mode TEXT,           -- 使用方式(综资)
+    gateway_ip TEXT,         -- 网关IP地址(综资)
+    device_status TEXT,      -- 使用状态(综资)
+    manage_status TEXT,      -- 管理状态(综资)
+    device_room TEXT,        -- 设备所属机房(综资)
+    loopback_ip TEXT,        -- Loopbak地址(综资)
+    resp_dept TEXT,          -- 负责部门-移动侧(综资)
+    resp_person_name TEXT,   -- 负责人姓名-移动侧(综资)
+    resp_person_phone TEXT,  -- 负责人电话-移动侧(综资)
+    resp_person_email TEXT,  -- 负责人邮箱-移动侧(综资)
+    unit_cert_type TEXT,     -- 单位证件类型(综资)
+    unit_cert_no TEXT,       -- 单位证件号码(综资)
+    address_type TEXT,       -- 地址类型(综资)
+    product_instance_id TEXT, -- 产品实例标识(综资)
+    device_id TEXT,          -- 所属设备(综资)
+    change_time TEXT         -- 变更时间(综资)
+);
+
+-- 数据字典表(编码→名称映射, 如 CITY_ID → CITY_NAME)
+CREATE TABLE IF NOT EXISTS data_dictionary (
+    id TEXT PRIMARY KEY,
+    dict_type TEXT NOT NULL,        -- 字典类型: CITY/PROVINCE/OPERATOR等
+    dict_code TEXT NOT NULL,        -- 编码值(如 CITY_ID=6)
+    dict_name TEXT NOT NULL,        -- 名称(如 合肥市)
+    description TEXT,              -- 描述说明
+    status TEXT DEFAULT 'active',  -- active/inactive
+    created_at TEXT,
+    updated_at TEXT,
+    UNIQUE(dict_type, dict_code)
 );
 
 -- 查询任务表
@@ -263,7 +377,288 @@ def init_db():
         conn.executescript(SCHEMA)
         migrate_scene_paths(conn)
         migrate_query_tables(conn)
+        migrate_ip_subjects(conn)
     seed_data()
+    seed_data_dictionary()
+    seed_real_test_data()
+
+
+def seed_data_dictionary():
+    """Seed data dictionary entries (CITY_ID → CITY_NAME, etc.)."""
+    with get_conn() as conn:
+        existing = conn.execute("SELECT COUNT(*) as c FROM data_dictionary WHERE dict_type='CITY'").fetchone()["c"]
+        if existing > 0:
+            return
+        # Anhui province city code mapping (matches the CITY_ID field in 家宽/移网/综资 data)
+        cities = [
+            ("1", "合肥市"), ("2", "芜湖市"), ("3", "蚌埠市"), ("4", "淮南市"),
+            ("5", "马鞍山市"), ("6", "淮北市"), ("7", "铜陵市"), ("8", "安庆市"),
+            ("9", "黄山市"), ("10", "滁州市"), ("11", "阜阳市"), ("12", "宿州市"),
+            ("13", "六安市"), ("14", "亳州市"), ("15", "池州市"), ("16", "宣城市"),
+        ]
+        for code, name in cities:
+            conn.execute(
+                "INSERT INTO data_dictionary (id, dict_type, dict_code, dict_name, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                (gen_id("dd_"), "CITY", code, name, "安徽省地市编码", "active", now_str(), now_str()),
+            )
+        # 网络类型 (移网)
+        network_types = [("3", "5G"), ("2", "4G"), ("1", "3G")]
+        for code, name in network_types:
+            conn.execute(
+                "INSERT INTO data_dictionary (id, dict_type, dict_code, dict_name, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                (gen_id("dd_"), "NETWORK_TYPE", code, name, "移网接入网络类型", "active", now_str(), now_str()),
+            )
+        # 单位属性 (信安)
+        unit_attrs = [("4", "增值电信业务经营者")]
+        for code, name in unit_attrs:
+            conn.execute(
+                "INSERT INTO data_dictionary (id, dict_type, dict_code, dict_name, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                (gen_id("dd_"), "UNIT_ATTR", code, name, "信安系统单位属性", "active", now_str(), now_str()),
+            )
+        # 证件类型 (信安/综资)
+        cert_types = [("1", "工商营业执照"), ("2", "组织机构代码证"), ("3", "事业单位法人证书")]
+        for code, name in cert_types:
+            conn.execute(
+                "INSERT INTO data_dictionary (id, dict_type, dict_code, dict_name, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                (gen_id("dd_"), "CERT_TYPE", code, name, "证件类型", "active", now_str(), now_str()),
+            )
+        # 应用服务类型 (信安)
+        app_service_types = [("999", "其他"), ("3", "IDC业务")]
+        for code, name in app_service_types:
+            conn.execute(
+                "INSERT INTO data_dictionary (id, dict_type, dict_code, dict_name, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                (gen_id("dd_"), "APP_SERVICE_TYPE", code, name, "信安系统应用服务类型", "active", now_str(), now_str()),
+            )
+        # 业务类型 (信安/综资)
+        business_types = [("1", "互联网接入"), ("5", "IDC业务")]
+        for code, name in business_types:
+            conn.execute(
+                "INSERT INTO data_dictionary (id, dict_type, dict_code, dict_name, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                (gen_id("dd_"), "BUSINESS_TYPE", code, name, "业务类型", "active", now_str(), now_str()),
+            )
+
+
+def seed_real_test_data():
+    """Import the four real test datasets (家宽/信安/移网/综资) into ip_subjects."""
+    with get_conn() as conn:
+        existing = conn.execute("SELECT COUNT(*) as c FROM ip_subjects WHERE source_subtype='家宽'").fetchone()["c"]
+        if existing > 0:
+            return
+        _seed_home_broadband(conn)
+        _seed_xinan_system(conn)
+        _seed_mobile_network(conn)
+        _seed_zongzi(conn)
+
+
+def _seed_home_broadband(conn):
+    """家宽测试集（动态）数据"""
+    def _fmt(t):
+        # Convert "20260901000016" -> "2026-09-01 00:00:16" for consistent time filtering
+        if len(t) == 14 and t.isdigit():
+            return f"{t[0:4]}-{t[4:6]}-{t[6:8]} {t[8:10]}:{t[10:12]}:{t[12:14]}"
+        return t
+    rows = [
+        ("13800000001", "20260901000016", "20260902000003", "10.2.0.1",  "2409:8a30:a80e::b087", "1024", "2047", "6"),
+        ("13800000002", "20260901000016", "20260902000003", "10.2.0.2",  "2409:8a30:a80e::a231", "1024", "2047", "6"),
+        ("13800000003", "20260901000016", "20260902000003", "10.2.0.3",  "2409:8a30:8c09::1306", "1024", "2047", "14"),
+        ("13800000004", "20260901000016", "20260902000003", "10.2.0.4",  "2409:8a30:a80e::6f41", "1024", "2047", "6"),
+        ("13800000005", "20260901000016", "20260902000003", "10.2.0.5",  "2409:8a30:a80e::6112", "1024", "2047", "6"),
+        ("13800000006", "20260901000016", "20260902000003", "10.2.0.6",  "2409:8a30:940b::dc22", "1024", "2047", "14"),
+        ("13800000007", "20260901000016", "20260902000003", "10.2.0.7",  "2409:8a30:3c01::aef4", "1024", "2047", "11"),
+        ("13800000008", "20260901000016", "20260902000003", "10.2.0.8",  "2409:8a30:0a06::c9dd", "1024", "2047", "1"),
+        ("13800000009", "20260901000016", "20260902000003", "10.2.0.9",  "2409:8a31:0c0b::4e42", "1024", "2047", "1"),
+        ("13800000010", "20260901000016", "20260902000003", "10.2.0.10", "2409:8a30:5f04::74a1", "1024", "2047", "5"),
+        ("13800000011", "20260901000016", "20260902000003", "10.2.0.11", "2409:8a30:2004::f0fd", "1024", "2047", "2"),
+        ("13800000012", "20260901000016", "20260902000003", "10.2.0.12", "2409:8a30:020e::3b55", "1024", "2047", "1"),
+        ("13800000013", "20260901000016", "20260902000003", "10.2.0.13", "2409:8a30:2e0e::8326", "1024", "2047", "3"),
+        ("13800000014", "20260901000016", "20260902000003", "10.2.0.14", "2409:8a30:7e07::2ba9", "1024", "2047", "4"),
+        ("13800000015", "20260901000016", "20260902000003", "10.2.0.15", "2409:8a30:9a08::0ea9", "1024", "2047", "14"),
+        ("13800000016", "20260901000016", "20260902000003", "10.2.0.16", "2409:8a31:1004::44c9", "1024", "2047", "1"),
+    ]
+    for r in rows:
+        begin_t = _fmt(r[1])
+        end_t = _fmt(r[2])
+        raw = json.dumps({
+            "SUBSCRIBERID": r[0], "BEGINTIME": r[1], "ENDTIME": r[2],
+            "IPV4ADDRESS": r[3], "IPV6ADDRESS": r[4],
+            "NAT_BEGIN_PORT": r[5], "NAT_END_PORT": r[6], "CITY_ID": r[7],
+        }, ensure_ascii=False)
+        conn.execute(
+            """INSERT INTO ip_subjects (
+                id, ip_address, ip_version, scene_type, port, start_time, end_time,
+                data_source, ip_type, raw_data, created_at,
+                source_subtype, subscriber_id, city_id, ipv4_address, ipv6_address,
+                nat_begin_port, nat_end_port
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (gen_id("ip_"), r[3], "IPv4", "家宽", "0", begin_t, end_t,
+             "家宽BRAS数据源", "动态", raw, now_str(),
+             "家宽", r[0], r[7], r[3], r[4], r[5], r[6]),
+        )
+
+
+def _seed_xinan_system(conn):
+    """信安系统测试集（静态）数据 (28 columns matching source data)"""
+    # Indices map to source columns:
+    # 0=IDC/ISP许可证号, 1=单位名称, 2=单位属性, 3=证件类型, 4=证件号码, 5=邮政编码,
+    # 6=注册时间, 7=服务开通时间, 8=单位地址XA, 9=责任人-姓名, 10=责任人-证件类型,
+    # 11=责任人-证件号码, 12=责任人-固定电话, 13=责任人-移动电话, 14=责任人-Email,
+    # 15=用户备注信息, 16=所属机房, 17=机房区域名称, 18=机柜名称, 19=资源分配时间,
+    # 20=IP类型, 21=外网起始IP, 22=外网终止IP, 23=网络带宽, 24=所属区域,
+    # 25=应用服务类型, 26=业务类型, 27=用户使用链路信息
+    rows = [
+        ("", "单位XA0000001", "4", "1", "91000000001", "", "", "2026/8/1", "地址XA0000001",
+         "某某XA0000001", "", "", "", "13600000001", "13600000001@136.com", "",
+         "马鞍山", "雨山", "", "2020-07-01", "0", "10.1.0.1", "10.1.0.1", "", "340404", "999", "1", ""),
+        ("", "单位XA0000002", "4", "1", "91000000002", "", "", "2026/1/20", "地址XA0000002",
+         "某某XA0000002", "", "", "", "13600000002", "13600000002@136.com", "",
+         "马鞍山", "雨山", "", "2026-02-12", "0", "10.1.0.2", "10.1.0.2", "", "340200", "999", "1", ""),
+        ("", "单位XA0000003", "4", "1", "91000000003", "", "", "2026/7/29", "地址XA0000003",
+         "某某XA0000003", "", "", "", "13600000003", "13600000003@136.com", "",
+         "马鞍山", "雨山", "", "2024-01-09", "0", "10.1.0.3", "10.1.0.3", "", "340202", "999", "1", ""),
+        ("", "单位XA0000004", "4", "1", "91000000004", "", "", "2026/1/11", "地址XA0000004",
+         "某某XA0000004", "", "", "", "13600000004", "13600000004@136.com", "",
+         "马鞍山", "雨山", "", "2024-01-11", "0", "10.1.0.4", "10.1.0.4", "", "341802", "3", "1", ""),
+        ("", "单位XA0000005", "4", "1", "91000000005", "", "", "2024/8/22", "地址XA0000005",
+         "某某XA0000005", "", "", "", "13600000005", "13600000005@136.com", "",
+         "滁州", "天长", "", "2024-01-11", "0", "10.1.0.5", "10.1.0.5", "", "340404", "999", "5", ""),
+    ]
+    for r in rows:
+        raw = json.dumps({
+            "IDC/ISP许可证号": r[0], "单位名称": r[1], "单位属性": r[2],
+            "证件类型": r[3], "证件号码": r[4], "邮政编码": r[5], "注册时间": r[6],
+            "服务开通时间": r[7], "单位地址XA": r[8],
+            "网络信息安全责任人-姓名": r[9], "网络信息安全责任人-证件类型": r[10],
+            "网络信息安全责任人-证件号码": r[11], "网络信息安全责任人-固定电话": r[12],
+            "网络信息安全责任人-移动电话": r[13], "网络信息安全责任人-Email": r[14],
+            "用户备注信息": r[15], "所属机房": r[16], "机房区域名称": r[17],
+            "机柜名称": r[18], "资源分配时间": r[19], "IP类型": r[20],
+            "外网起始IP": r[21], "外网终止IP": r[22], "网络带宽": r[23],
+            "所属区域": r[24], "应用服务类型": r[25], "业务类型": r[26], "用户使用链路信息": r[27],
+        }, ensure_ascii=False)
+        conn.execute(
+            """INSERT INTO ip_subjects (
+                id, ip_address, ip_version, scene_type, port, start_time, end_time,
+                unit_name, unit_name_plain, data_source, ip_type, raw_data, created_at,
+                source_subtype, isp_license, unit_attr, cert_type, cert_no, postal_code,
+                register_time, service_open_time, unit_address,
+                security_person_name, security_person_cert_type, security_person_cert_no,
+                security_person_phone, security_person_mobile, security_person_email,
+                user_remark, machine_room, machine_room_area, rack_name, resource_alloc_time,
+                ip_type_code, public_ip_start, public_ip_end, network_bandwidth, region_code,
+                app_service_type, business_type, link_info
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (gen_id("ip_"), r[21], "IPv4", "IDC", "0", r[6], r[19],
+             r[1], r[1], "信安系统", "静态", raw, now_str(),
+             "信安", r[0], r[2], r[3], r[4], r[5], r[6], r[7], r[8],
+             r[9], r[10], r[11], r[12], r[13], r[14], r[15], r[16], r[17], r[18], r[19],
+             r[20], r[21], r[22], r[23], r[24], r[25], r[26], r[27]),
+        )
+
+
+def _seed_mobile_network(conn):
+    """移网测试集（动态）数据"""
+    def _fmt(t):
+        # Convert "20260901000000" -> "2026-09-01 00:00:00" for consistent time filtering
+        if len(t) == 14 and t.isdigit():
+            return f"{t[0:4]}-{t[4:6]}-{t[6:8]} {t[8:10]}:{t[10:12]}:{t[12:14]}"
+        return t
+    rows = [
+        ("13700000001", "10.3.0.1", "2047", "2047", "", "443", "0", "", "4609290",
+         "6200000000", "6100000000", "1700000", "551", "3", "0", "",
+         "20260901000000", "20260901000059", "59", "1584", "6938", "12", "14", "551"),
+        ("13700000002", "10.3.0.2", "2047", "2047", "", "53", "1", "", "4609290",
+         "6200000000", "6100000000", "1700000", "551", "3", "0", "",
+         "20260901000000", "20260901000059", "59", "87", "442", "1", "1", "551"),
+        ("13700000003", "10.3.0.3", "2047", "2047", "", "443", "0", "", "4609290",
+         "6200000000", "6100000000", "1700000", "551", "3", "0", "",
+         "20260901000000", "20260901000059", "59", "937", "847", "6", "6", "551"),
+    ]
+    field_names = [
+        "用户永久标识", "用户私网IP地址", "私网端口号", "源端口号", "源公网IP地址",
+        "目的端口号", "数据传输协议", "用户访问URL", "接入位置", "登录小区号",
+        "下线小区号", "基站标识", "拜访网络标识", "网络类型", "用户漫游标志",
+        "网络切片选择辅助标识", "访问开始时间", "访问结束时间", "访问时长",
+        "发送字节数", "接收字节数", "发送包数", "接收包数", "归属地标识",
+    ]
+    for r in rows:
+        raw_dict = dict(zip(field_names, r))
+        raw = json.dumps(raw_dict, ensure_ascii=False)
+        begin_t = _fmt(r[16])
+        end_t = _fmt(r[17])
+        conn.execute(
+            """INSERT INTO ip_subjects (
+                id, ip_address, ip_version, scene_type, port, start_time, end_time,
+                user_id, data_source, ip_type, raw_data, created_at,
+                source_subtype, subscriber_id, user_private_ip, private_port, source_port,
+                source_public_ip, dest_port, transport_protocol, user_url, access_location,
+                login_cell_id, logout_cell_id, base_station_id, visit_network_id, network_type,
+                roam_flag, slice_id, visit_duration, send_bytes, recv_bytes, send_packets,
+                recv_packets, home_id
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (gen_id("ip_"), r[1], "IPv4", "移网", "0", begin_t, end_t,
+             r[0], "移网AAA数据源", "动态", raw, now_str(),
+             "移网", r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8],
+             r[9], r[10], r[11], r[12], r[13], r[14], r[15], r[18], r[19], r[20], r[21], r[22], r[23]),
+        )
+
+
+def _seed_zongzi(conn):
+    """综资测试集（静态）数据 (32 columns matching source data)"""
+    rows = [
+        # IPv4地址名称, 是否专业公司, 专业公司名称, 单位名称, 单位分类, 单位性质, 所属地市, 所属区县,
+        # 单位行政级别, 单位行业, 地址, 联系人姓名, 联系人电话, 联系人邮箱, 网关物理位置, 使用方式,
+        # 网关IP, 业务类型, 使用状态, 管理状态, 设备所属机房, Loopbak, 负责部门, 负责人姓名,
+        # 负责人电话, 负责人邮箱, 单位证件类型, 单位证件号码, 地址类型, 产品实例ID, 所属设备, 变更时间
+        ("10.1.0.1", "", "", "单位ZZ0000001", "其他", "企业", "马鞍山", "雨山",
+         "无行政级别", "教育", "地址0000001", "某某0000001", "13900000001", "13900000001@139.com",
+         "", "静态", "", "互联网专线", "占用", "已启用", "", "", "政企部", "", "", "",
+         "统一社会信用代码", "90000000001", "公网", "", "", "2025/12/22 16:30"),
+        ("10.1.0.2", "", "", "单位ZZ0000002", "其他", "企业", "马鞍山", "雨山",
+         "无行政级别", "教育", "地址0000002", "某某0000002", "13900000002", "13900000002@139.com",
+         "", "静态", "", "互联网专线", "占用", "已启用", "", "", "政企部", "", "", "",
+         "统一社会信用代码", "90000000002", "公网", "", "", "2025/12/22 16:30"),
+        ("10.1.0.3", "", "", "单位ZZ0000003", "其他", "企业", "马鞍山", "雨山",
+         "无行政级别", "教育", "地址0000003", "某某0000003", "13900000003", "13900000003@139.com",
+         "", "静态", "", "互联网专线", "占用", "已启用", "", "", "政企部", "", "", "",
+         "统一社会信用代码", "90000000003", "公网", "", "", "2025/12/22 16:30"),
+    ]
+    field_names = [
+        "IPv4地址名称", "是否是专业公司", "专业公司名称", "单位名称/具体业务信息",
+        "单位所属分类", "单位性质", "所属地市", "所属区县", "单位行政级别",
+        "单位所属行业分类", "地址详细地址", "联系人姓名(客户侧)", "联系人电话(客户侧)",
+        "联系人邮箱(客户侧)", "网关物理位置", "使用方式", "网关IP地址", "业务类型",
+        "使用状态", "管理状态", "设备所属机房", "Loopbak地址", "负责部门(移动侧)",
+        "负责人姓名(移动侧)", "负责人电话(移动侧)", "负责人邮箱(移动侧)",
+        "单位证件类型", "单位证件号码", "地址类型", "产品实例标识", "所属设备", "变更时间",
+    ]
+    for r in rows:
+        raw_dict = dict(zip(field_names, r))
+        raw = json.dumps(raw_dict, ensure_ascii=False)
+        # r indices: 0=IP, 1=是否专业公司, 2=专业公司名称, 3=单位名称, 4=单位分类, 5=单位性质,
+        # 6=所属地市, 7=所属区县, 8=单位行政级别, 9=单位行业, 10=地址, 11=联系人姓名,
+        # 12=联系人电话, 13=联系人邮箱, 14=网关物理位置, 15=使用方式, 16=网关IP, 17=业务类型,
+        # 18=使用状态, 19=管理状态, 20=设备所属机房, 21=Loopbak, 22=负责部门, 23=负责人姓名,
+        # 24=负责人电话, 25=负责人邮箱, 26=单位证件类型, 27=单位证件号码, 28=地址类型,
+        # 29=产品实例标识, 30=所属设备, 31=变更时间
+        conn.execute(
+            """INSERT INTO ip_subjects (
+                id, ip_address, ip_version, scene_type, port, start_time, end_time,
+                unit_name, unit_name_plain, address, address_plain, data_source, ip_type,
+                raw_data, created_at, source_subtype, ipv4_address, is_pro_company,
+                pro_company_name, unit_category, unit_nature, unit_admin_level,
+                unit_industry, contact_person_client, contact_phone_client,
+                contact_email_client, gateway_location, use_mode, gateway_ip,
+                business_type, device_status, manage_status, device_room, loopback_ip,
+                resp_dept, resp_person_name, resp_person_phone, resp_person_email,
+                unit_cert_type, unit_cert_no, address_type, product_instance_id,
+                device_id, change_time
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (gen_id("ip_"), r[0], "IPv4", "专线", "0", r[31], r[31],
+             r[3], r[3], r[10], r[10], "综资系统", "静态", raw, now_str(),
+             "综资", r[0], r[1], r[2], r[4], r[5], r[8], r[9], r[11], r[12],
+             r[13], r[14], r[15], r[16], r[17], r[18], r[19], r[20], r[21],
+             r[22], r[23], r[24], r[25], r[26], r[27], r[28], r[29], r[30], r[31]),
+        )
 
 
 def migrate_query_tables(conn):
@@ -274,6 +669,38 @@ def migrate_query_tables(conn):
     path_cols = [r[1] for r in conn.execute("PRAGMA table_info(task_paths)").fetchall()]
     if path_cols and "node_id" not in path_cols:
         conn.execute("ALTER TABLE task_paths ADD COLUMN node_id TEXT")
+
+
+def migrate_ip_subjects(conn):
+    """Add new data-source-specific columns to ip_subjects for existing databases."""
+    new_cols = [
+        "source_subtype", "subscriber_id", "city_id", "ipv4_address", "ipv6_address",
+        "nat_begin_port", "nat_end_port", "isp_license", "unit_attr", "cert_type", "cert_no",
+        "postal_code", "register_time", "service_open_time", "unit_address",
+        "security_person_name", "security_person_cert_type", "security_person_cert_no",
+        "security_person_phone", "security_person_mobile", "security_person_email",
+        "user_remark", "machine_room", "machine_room_area", "rack_name",
+        "resource_alloc_time", "ip_type_code", "public_ip_start", "public_ip_end",
+        "network_bandwidth", "region_code", "app_service_type", "business_type", "link_info",
+        "public_user_id", "permanent_device_id", "user_private_ip", "source_public_ip",
+        "private_port", "source_port", "dest_ip", "dest_port", "transport_protocol",
+        "user_url", "access_location", "login_cell_id", "logout_cell_id", "base_station_id",
+        "visit_network_id", "network_type", "roam_flag", "slice_id", "visit_duration",
+        "send_bytes", "recv_bytes", "send_packets", "recv_packets", "pdu_session_id",
+        "nat_device_id", "operator_id", "access_mode_5g", "dnn", "collector_left_ip",
+        "collector_right_ip", "protocol_type", "http_method", "home_id", "link_access_id",
+        "vpn_id", "location_type", "location_id", "ext_field",
+        "is_pro_company", "pro_company_name", "unit_category", "unit_nature",
+        "unit_admin_level", "unit_industry", "contact_person_client", "contact_phone_client",
+        "contact_email_client", "gateway_location", "use_mode", "gateway_ip", "device_status",
+        "manage_status", "device_room", "loopback_ip", "resp_dept", "resp_person_name",
+        "resp_person_phone", "resp_person_email", "unit_cert_type", "unit_cert_no",
+        "address_type", "product_instance_id", "device_id", "change_time",
+    ]
+    existing = [r[1] for r in conn.execute("PRAGMA table_info(ip_subjects)").fetchall()]
+    for col in new_cols:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE ip_subjects ADD COLUMN {col} TEXT")
 
 
 def build_default_path(ds_items):
@@ -445,7 +872,7 @@ def seed_data():
         # Scenes (five types)
         scenes = [
             ("移网IP定位场景", "移网", "10.0.0.0/8,100.64.0.0/10", "移动网络用户IP主体定位"),
-            ("家宽IP定位场景", "家宽", "192.168.0.0/16,10.1.0.0/16", "家庭宽带用户IP主体定位"),
+            ("家宽IP定位场景", "家宽", "192.168.0.0/16,10.1.0.0/16,10.2.0.0/16", "家庭宽带用户IP主体定位"),
             ("专线IP定位场景", "专线", "172.16.0.0/12", "专线静态IP主体定位"),
             ("IDC IP定位场景", "IDC", "203.0.0.0/8", "IDC机房IP资产定位"),
             ("自有业务IP定位场景", "自有业务", "111.0.0.0/8", "自有业务静态IP定位"),

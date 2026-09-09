@@ -58,6 +58,7 @@
                     <el-menu-item index="datasource">数据源管理</el-menu-item>
                     <el-menu-item index="template">主体信息管理</el-menu-item>
                     <el-menu-item index="scene">场景路径管理</el-menu-item>
+                    <el-menu-item index="dictionary"><el-icon><Reading/></el-icon><span>数据字典配置</span></el-menu-item>
                 </el-sub-menu>
                 <el-sub-menu index="validate">
                     <template #title><el-icon><Checked/></el-icon><span>数据校验</span></template>
@@ -417,6 +418,44 @@
                     </el-card>
                 </div>
 
+                <!-- Data Dictionary -->
+                <div v-show="activeMenu==='dictionary'">
+                    <el-card>
+                        <template #header>
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <span>数据字典配置 <el-tag type="info" size="small">编码→名称映射 (如 CITY_ID → CITY_NAME)</el-tag></span>
+                                <el-button type="primary" @click="openDictionaryDialog()">新增字典条目</el-button>
+                            </div>
+                        </template>
+                        <el-form :inline="true" :model="dictQuery">
+                            <el-form-item label="字典类型">
+                                <el-select v-model="dictQuery.dict_type" clearable placeholder="全部类型" @change="loadDictionary(1)">
+                                    <el-option v-for="t in dictTypes" :key="t.dict_type" :label="t.dict_type" :value="t.dict_type">
+                                        <span>{{ t.dict_type }}</span><span style="float:right;color:#999;font-size:12px">({{ t.count }})</span>
+                                    </el-option>
+                                </el-select>
+                            </el-form-item>
+                            <el-form-item label="关键词"><el-input v-model="dictQuery.keyword" clearable placeholder="编码/名称/描述"></el-input></el-form-item>
+                            <el-form-item><el-button type="primary" @click="loadDictionary(1)">查询</el-button><el-button @click="resetDictQuery">重置</el-button></el-form-item>
+                        </el-form>
+                        <el-table :data="dictList" border stripe>
+                            <el-table-column prop="dict_type" label="字典类型" width="140"></el-table-column>
+                            <el-table-column prop="dict_code" label="编码" width="120"></el-table-column>
+                            <el-table-column prop="dict_name" label="名称"></el-table-column>
+                            <el-table-column prop="description" label="描述" show-overflow-tooltip></el-table-column>
+                            <el-table-column label="状态" width="80"><template #default="{row}"><el-tag :type="row.status==='active'?'success':'info'">{{row.status==='active'?'启用':'停用'}}</el-tag></template></el-table-column>
+                            <el-table-column prop="updated_at" label="更新时间" width="160"></el-table-column>
+                            <el-table-column label="操作" width="160">
+                                <template #default="{row}">
+                                    <el-button size="small" text type="warning" @click="openDictionaryDialog(row)">编辑</el-button>
+                                    <el-button size="small" text type="danger" @click="deleteDictionary(row)">删除</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                        <el-pagination style="margin-top:15px;text-align:right" v-model:current-page="dictPage" :page-size="20" :total="dictTotal" layout="total, prev, pager, next" @current-change="loadDictionary"></el-pagination>
+                    </el-card>
+                </div>
+
                 <!-- Security Config -->
                 <div v-show="activeMenu==='security'">
                     <el-tabs v-model="securityTab">
@@ -484,6 +523,23 @@
     </el-container>
 
     <!-- Dialogs -->
+    <!-- Data Dictionary Dialog -->
+    <el-dialog v-model="showDictDialog" :title="dictForm.id?'编辑字典条目':'新增字典条目'" width="520px">
+        <el-form :model="dictForm" label-width="100px">
+            <el-form-item label="字典类型" required>
+                <el-select v-model="dictForm.dict_type" filterable allow-create default-first-option placeholder="如 CITY / PROVINCE / OPERATOR">
+                    <el-option v-for="t in dictTypes" :key="t.dict_type" :label="t.dict_type" :value="t.dict_type"></el-option>
+                </el-select>
+                <span style="margin-left:8px;color:#999;font-size:12px">可在下拉中选已有类型或输入新类型</span>
+            </el-form-item>
+            <el-form-item label="编码" required><el-input v-model="dictForm.dict_code" placeholder="如 6 (对应 CITY_ID)"></el-input></el-form-item>
+            <el-form-item label="名称" required><el-input v-model="dictForm.dict_name" placeholder="如 淮北市 (对应 CITY_NAME)"></el-input></el-form-item>
+            <el-form-item label="描述"><el-input type="textarea" v-model="dictForm.description" :rows="2" placeholder="可选"></el-input></el-form-item>
+            <el-form-item label="状态"><el-switch v-model="dictForm.status" active-value="active" inactive-value="inactive"></el-switch></el-form-item>
+        </el-form>
+        <template #footer><el-button @click="showDictDialog=false">取消</el-button><el-button type="primary" @click="saveDictionary">保存</el-button></template>
+    </el-dialog>
+
     <!-- Manual Fix Dialog -->
     <el-dialog v-model="showManualFixDialog" title="人工修正IP主体信息" width="500px">
         <el-form :model="manualFixForm" label-width="100px">

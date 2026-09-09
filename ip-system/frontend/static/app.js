@@ -37,7 +37,7 @@ const app = createApp({
         const activeMenu = ref('dashboard');
         const menuTitles = {
             'dashboard': '系统首页', 'query-create': 'IP主体信息查询', 'query-list': '任务列表查询', 'query-batch': '批量导入查询',
-            'datasource': '数据源管理', 'template': '主体信息管理', 'scene': '场景路径管理',
+            'datasource': '数据源管理', 'template': '主体信息管理', 'scene': '场景路径管理', 'dictionary': '数据字典配置',
             'conflict': '冲突工单检测', 'log': '日志管理', 'security': '安全配置'
         };
         const pageTitle = computed(() => menuTitles[activeMenu.value] || '');
@@ -49,6 +49,7 @@ const app = createApp({
             if (key === 'datasource') loadDataSources(1);
             if (key === 'template') loadTemplates(1);
             if (key === 'scene') loadScenes(1);
+            if (key === 'dictionary') { loadDictionaryTypes(); loadDictionary(1); }
             if (key === 'conflict') loadConflicts(1);
             if (key === 'log') loadLogs(1);
             if (key === 'security') loadSecurityConfig();
@@ -723,6 +724,44 @@ const app = createApp({
         };
         const resetLogQuery = () => { Object.keys(logQuery).forEach(k => logQuery[k] = ''); loadLogs(1); };
 
+        // Data Dictionary (CITY_ID -> CITY_NAME, etc.)
+        const dictQuery = reactive({ dict_type: '', keyword: '' });
+        const dictList = ref([]);
+        const dictTypes = ref([]);
+        const dictPage = ref(1);
+        const dictTotal = ref(0);
+        const showDictDialog = ref(false);
+        const dictForm = reactive({ id: '', dict_type: 'CITY', dict_code: '', dict_name: '', description: '', status: 'active' });
+
+        const loadDictionary = async (page) => {
+            dictPage.value = page;
+            const params = new URLSearchParams({ page, page_size: 20, ...Object.fromEntries(Object.entries(dictQuery).filter(([_, v]) => v)) });
+            try { const res = await API('/api/dictionary?' + params); dictList.value = res.data; dictTotal.value = res.total; } catch(e) { ElMessage.error(e.message); }
+        };
+        const loadDictionaryTypes = async () => {
+            try { const res = await API('/api/dictionary/types'); dictTypes.value = res.data || []; } catch(e) { console.error(e); }
+        };
+        const resetDictQuery = () => { dictQuery.dict_type = ''; dictQuery.keyword = ''; loadDictionary(1); };
+        const openDictionaryDialog = (row) => {
+            if (row) { Object.keys(dictForm).forEach(k => dictForm[k] = row[k] !== undefined ? row[k] : dictForm[k]); }
+            else { Object.assign(dictForm, { id: '', dict_type: dictQuery.dict_type || 'CITY', dict_code: '', dict_name: '', description: '', status: 'active' }); }
+            showDictDialog.value = true;
+        };
+        const saveDictionary = async () => {
+            if (!dictForm.dict_type || !dictForm.dict_code || !dictForm.dict_name) {
+                ElMessage.warning('字典类型、编码、名称不能为空'); return;
+            }
+            try {
+                const payload = { dict_type: dictForm.dict_type, dict_code: String(dictForm.dict_code), dict_name: dictForm.dict_name, description: dictForm.description || '', status: dictForm.status || 'active' };
+                if (dictForm.id) { await API('/api/dictionary/' + dictForm.id, { method: 'PUT', body: payload }); }
+                else { await API('/api/dictionary', { method: 'POST', body: payload }); }
+                ElMessage.success('保存成功'); showDictDialog.value = false; loadDictionary(dictPage.value); loadDictionaryTypes();
+            } catch(e) { ElMessage.error(e.message); }
+        };
+        const deleteDictionary = async (row) => {
+            try { await ElMessageBox.confirm('确认删除字典条目 [' + row.dict_type + '/' + row.dict_code + ']?', '提示', { type: 'warning' }); await API('/api/dictionary/' + row.id, { method: 'DELETE' }); ElMessage.success('删除成功'); loadDictionary(dictPage.value); loadDictionaryTypes(); } catch(e) { if (e && e.message) ElMessage.error(e.message); }
+        };
+
         // Security Config
         const securityTab = ref('password');
         const securityConfig = reactive({});
@@ -778,6 +817,7 @@ const app = createApp({
             savePath, publishPath,
             conflictQuery, conflictList, conflictPage, conflictTotal, loadConflicts, resetConflictQuery, showConflictDetailDialog, conflictDetail, conflictLifecycle, viewConflictDetail, showProcessDialog, processForm, processConflict, submitProcessConflict,
             logQuery, logList, logPage, logTotal, loadLogs, resetLogQuery,
+            dictQuery, dictList, dictTypes, dictPage, dictTotal, loadDictionary, loadDictionaryTypes, resetDictQuery, showDictDialog, dictForm, openDictionaryDialog, saveDictionary, deleteDictionary,
             securityTab, securityConfig, loadSecurityConfig, saveSecurityConfig, ipAccessList, loadIpAccess, showIpAccessDialog, ipAccessForm, openIpAccessDialog, saveIpAccess, toggleIpAccess, deleteIpAccess,
         };
     }
