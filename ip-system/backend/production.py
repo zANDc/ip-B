@@ -725,6 +725,92 @@ def log_operation(conn, operation_type: str, operator: str, request_url: str, op
 
 
 # ====================================================================
+# ⑨ 置信度计算(供API调用)
+# ====================================================================
+
+def calculate_confidence_for_subject(conn, subject: Dict, datasource: Dict = None, template: Dict = None) -> Dict:
+    """
+    计算单个IP主体查询结果的置信度
+    入参: subject=ip_subjects一行, datasource=数据源, template=模板
+    返回: {score, label, detail: {authority, completeness, freshness}}
+    """
+    # 1) 权威性(50%)
+    if datasource:
+        level = datasource.get("authority_level") or "中"
+        score_map = {"高": 95, "中": 75, "低": 55}
+        auth_score = score_map.get(level, 60)
+    else:
+        auth_score = 60
+        level = "中"
+
+    # 2) 完整度(30%) - 基于模板字段定义
+    if template:
+        tpl_fields = conn.execute(
+            "SELECT field_name FROM subject_template_fields WHERE template_id=?",
+            (template.get("id"),)
+        ).fetchall()
+        required_names = [f["field_name"] for f in tpl_fields] if tpl_fields else []
+    else:
+        required_names = []
+    if not required_names:
+        # fallback: 计算非空核心字段
+        core = ["ip_address", "scene_type", "data_source", "start_time", "end_time"]
+        filled = sum(1 for f in core if subject.get(f))
+        comp_score = int(filled / len(core) * 100) if core else 0
+        comp_total = len(core)
+        comp_filled = filled
+    else:
+        comp_filled = sum(1 for f in required_names if subject.get(f) not in (None, ""))
+        comp_total = len(required_names)
+        comp_score = int(comp_filled / comp_total * 100) if comp_total else 0
+
+    # 3) 新鲜度(20%) - 基于 start_time
+    fresh_score = 0
+    days = None
+    start_time = subject.get("start_time") or subject.get("query_time")
+    if start_time:
+        try:
+            if isinstance(start_time, str) and len(start_time) == 14 and start_time.isdigit():
+                dt = datetime.strptime(start_time, "%Y%m%d%H%M%S")
+            else:
+                dt = datetime.strptime(str(start_time)[:19], "%Y-%m-%d %H:%M:%S")
+            delta = datetime.now() - dt
+            days = max(delta.days, 0)
+            if days <= 1:
+                fresh_score = 100
+            elif days <= 7:
+                fresh_score = 90
+            elif days <= 30:
+                fresh_score = 75
+            elif days <= 90:
+                fresh_score = 55
+            else:
+                fresh_score = 30
+        except Exception:
+            fresh_score = 60
+    else:
+        fresh_score = 60
+
+    score = round(auth_score * 0.5 + comp_score * 0.3 + fresh_score * 0.2, 1)
+    if score >= 85:
+        label = "高"
+    elif score >= 60:
+        label = "中"
+    else:
+        label = "低"
+
+    return {
+        "score": score,
+        "label": label,
+        "detail": {
+            "authority": {"score": auth_score, "level": level, "weight": 50},
+            "completeness": {"score": comp_score, "filled": comp_filled, "total": comp_total, "weight": 30},
+            "freshness": {"score": fresh_score, "days": days, "weight": 20},
+        },
+    }
+
+
+# ====================================================================
 # 主入口
 # ====================================================================
 

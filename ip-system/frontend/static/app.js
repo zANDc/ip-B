@@ -37,7 +37,7 @@ const app = createApp({
         const activeMenu = ref('dashboard');
         const menuTitles = {
             'dashboard': '系统首页', 'query-create': 'IP主体信息查询', 'query-list': '任务列表查询', 'query-batch': '批量导入查询',
-            'datasource': '数据源管理', 'template': '主体信息管理', 'scene': '场景路径管理', 'dictionary': '数据字典配置',
+            'confidence': '置信度说明', 'datasource': '数据源管理', 'template': '主体信息管理', 'scene': '场景路径管理', 'dictionary': '数据字典配置',
             'conflict': '冲突工单检测', 'log': '日志管理', 'security': '安全配置'
         };
         const pageTitle = computed(() => menuTitles[activeMenu.value] || '');
@@ -46,6 +46,7 @@ const app = createApp({
             if (key === 'dashboard') loadDashboard();
             if (key === 'query-list') loadTasks(1);
             if (key === 'query-batch') { /* ready */ }
+            if (key === 'confidence') loadConfidenceStats();
             if (key === 'datasource') { loadAllTemplates(); loadDataSources(1); }
             if (key === 'template') loadTemplates(1);
             if (key === 'scene') { loadAllDataSources(); loadScenes(1); }
@@ -65,6 +66,17 @@ const app = createApp({
         ]);
         const loadDashboard = async () => {
             try { stats.value = await API('/api/dashboard/stats'); } catch(e) { console.error(e); }
+        };
+
+        // 置信度统计
+        const confidenceStats = ref(null);
+        const confidenceBySource = ref([]);
+        const loadConfidenceStats = async () => {
+            try {
+                const r = await API('/api/dashboard/confidence');
+                confidenceStats.value = r;
+                confidenceBySource.value = r.by_source || [];
+            } catch(e) { ElMessage.error(e.message); }
         };
 
         // IP Query
@@ -824,6 +836,7 @@ const app = createApp({
             token, loginForm, currentUser, handleLogin, logout,
             activeMenu, pageTitle, handleMenuSelect,
             stats, dashboardCards,
+            confidenceStats, confidenceBySource, loadConfidenceStats,
             queryForm, queryRules, queryLoading, queryResult, handleQuery, showPathReplay, viewPathReplay,
             showManualFixDialog, manualFixForm, showManualFix, submitManualFix,
             showSensitiveDialog, sensitiveForm, sensitiveResult, sensitiveVerifyCode, showSensitive, requestSensitiveApproval, verifySensitiveApproval,

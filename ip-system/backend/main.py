@@ -1968,6 +1968,74 @@ def dashboard_stats(request: Request):
         }
 
 
+@app.get("/api/dashboard/confidence")
+def dashboard_confidence(request: Request):
+    """查询结果置信度分布(基于已下发任务的实际结果)"""
+    with get_conn() as conn:
+        from production import calculate_confidence_for_subject
+        rows = conn.execute(
+            "SELECT DISTINCT s.* FROM ip_subjects s WHERE s.source_subtype IS NOT NULL ORDER BY s.id DESC LIMIT 200"
+        ).fetchall()
+        high = mid = low = 0
+        distribution = {"高(>=85)": 0, "中(60-84)": 0, "低(<60)": 0}
+        for r in rows:
+            sub = dict(r)
+            ds_id = sub.get("data_source_id") or sub.get("source_id")
+            ds = conn.execute("SELECT * FROM data_sources WHERE id=?", (ds_id,)).fetchone() if ds_id else None
+            tpl = conn.execute("SELECT * FROM subject_templates WHERE id=?", (sub.get("template_id"),)).fetchone()
+            score = calculate_confidence_for_subject(
+                conn,
+                sub,
+                dict(ds) if ds else None,
+                dict(tpl) if tpl else None,
+            )
+            label = score.get("label")
+            if label == "高":
+                high += 1
+                distribution["高(>=85)"] += 1
+            elif label == "中":
+                mid += 1
+                distribution["中(60-84)"] += 1
+            else:
+                low += 1
+                distribution["低(<60)"] += 1
+        return {
+            "total": len(rows),
+            "high": high,
+            "mid": mid,
+            "low": low,
+            "distribution": distribution,
+            "by_source": _confidence_by_source(conn),
+        }
+
+
+def _confidence_by_source(conn):
+    """按数据源统计平均置信度"""
+    from production import calculate_confidence_for_subject
+    out = []
+    sources = conn.execute("SELECT * FROM data_sources").fetchall()
+    for ds in sources:
+        rows = conn.execute(
+            "SELECT * FROM ip_subjects WHERE data_source_id=? ORDER BY id DESC LIMIT 20",
+            (ds["id"],),
+        ).fetchall()
+        if not rows:
+            out.append({"source_id": ds["id"], "source_name": ds["name"], "count": 0, "avg_confidence": 0})
+            continue
+        tpl = conn.execute("SELECT * FROM subject_templates WHERE id=?", (ds["template_id"],)).fetchone()
+        scores = []
+        for r in rows:
+            s = calculate_confidence_for_subject(conn, dict(r), dict(ds), dict(tpl) if tpl else None)
+            scores.append(s.get("score", 0))
+        out.append({
+            "source_id": ds["id"],
+            "source_name": ds["name"],
+            "count": len(rows),
+            "avg_confidence": round(sum(scores) / len(scores), 1) if scores else 0,
+        })
+    return out
+
+
 # ============ Serve Frontend ============
 @app.get("/", response_class=HTMLResponse)
 def index():

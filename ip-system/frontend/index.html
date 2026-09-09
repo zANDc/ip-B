@@ -52,6 +52,7 @@
                     <el-menu-item index="query-create">IP主体信息查询</el-menu-item>
                     <el-menu-item index="query-list">任务列表查询</el-menu-item>
                     <el-menu-item index="query-batch">批量导入查询</el-menu-item>
+                    <el-menu-item index="confidence"><el-icon><DataAnalysis/></el-icon><span>置信度说明</span></el-menu-item>
                 </el-sub-menu>
                 <el-sub-menu index="data">
                     <template #title><el-icon><Coin/></el-icon><span>数据与路径管理</span></template>
@@ -287,12 +288,95 @@
                     </el-card>
                 </div>
 
-                <!-- Data Source Management -->
-                <div v-show="activeMenu==='datasource'">
+                <!-- 置信度说明 & 分布 -->
+                <div v-show="activeMenu==='confidence'">
                     <el-card>
                         <template #header>
                             <div style="display:flex;justify-content:space-between;align-items:center">
-                                <span>数据源管理</span>
+                                <span><el-icon><DataAnalysis/></el-icon> 置信度计算规则与分布</span>
+                                <el-button type="primary" @click="loadConfidenceStats">刷新统计</el-button>
+                            </div>
+                        </template>
+                        <el-alert title="什么是置信度?" type="info" :closable="false" show-icon style="margin-bottom:15px">
+                            <template #default>
+                                置信度是系统在多数据源/多模板场景下,综合衡量每条IP主体查询结果可信度的量化指标(0-100%)。结果越可信,分值越高(>=85高, 60-84中, <60低),用于业务侧决策与冲突时的优先级判定。
+                            </template>
+                        </el-alert>
+                        <el-row :gutter="20">
+                            <el-col :span="8">
+                                <el-card shadow="hover" class="confidence-factor">
+                                    <div class="cf-weight">权重 50%</div>
+                                    <div class="cf-title">数据源权威性</div>
+                                    <el-progress :percentage="50" :show-text="false" color="#409EFF" :stroke-width="6"></el-progress>
+                                    <div class="cf-desc">来源于"数据源管理"中配置的权威性等级(高=95 / 中=75 / 低=55),权威性越高分数越高。</div>
+                                </el-card>
+                            </el-col>
+                            <el-col :span="8">
+                                <el-card shadow="hover" class="confidence-factor">
+                                    <div class="cf-weight">权重 30%</div>
+                                    <div class="cf-title">字段完整度</div>
+                                    <el-progress :percentage="30" :show-text="false" color="#67C23A" :stroke-width="6"></el-progress>
+                                    <div class="cf-desc">按"IP主体信息模板"字段定义计算非空比例,字段越完整分数越高。如模板缺失则降级用核心字段计算。</div>
+                                </el-card>
+                            </el-col>
+                            <el-col :span="8">
+                                <el-card shadow="hover" class="confidence-factor">
+                                    <div class="cf-weight">权重 20%</div>
+                                    <div class="cf-title">时间新鲜度</div>
+                                    <el-progress :percentage="20" :show-text="false" color="#E6A23C" :stroke-width="6"></el-progress>
+                                    <div class="cf-desc">基于 start_time 与当前时间的间隔。1天内=100, 7天内=90, 30天内=75, 90天内=55, 超过90天=30。</div>
+                                </el-card>
+                            </el-col>
+                        </el-row>
+                        <el-divider><span style="color:#909399">综合分 = 权威性×50% + 完整度×30% + 新鲜度×20%</span></el-divider>
+                        <h4>实际数据置信度分布</h4>
+                        <el-row :gutter="20" v-if="confidenceStats">
+                            <el-col :span="6">
+                                <el-statistic title="样本总数" :value="confidenceStats.total || 0"></el-statistic>
+                            </el-col>
+                            <el-col :span="6">
+                                <el-statistic title="高置信度(>=85)" :value="confidenceStats.high || 0" :value-style="{color:'#67C23A'}"></el-statistic>
+                            </el-col>
+                            <el-col :span="6">
+                                <el-statistic title="中置信度(60-84)" :value="confidenceStats.mid || 0" :value-style="{color:'#E6A23C'}"></el-statistic>
+                            </el-col>
+                            <el-col :span="6">
+                                <el-statistic title="低置信度(<60)" :value="confidenceStats.low || 0" :value-style="{color:'#F56C6C'}"></el-statistic>
+                            </el-col>
+                        </el-row>
+                        <el-table :data="confidenceBySource" border stripe style="margin-top:15px" v-if="confidenceBySource && confidenceBySource.length">
+                            <el-table-column prop="source_name" label="数据源"></el-table-column>
+                            <el-table-column prop="count" label="样本数" width="100"></el-table-column>
+                            <el-table-column label="平均置信度" width="200">
+                                <template #default="{row}">
+                                    <el-progress :percentage="row.avg_confidence" :color="row.avg_confidence>=85?'#67C23A':row.avg_confidence>=60?'#E6A23C':'#F56C6C'" :stroke-width="14"></el-progress>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                        <el-empty v-if="!confidenceStats || !confidenceStats.total" description="暂无查询结果数据,请先在'IP主体信息查询'页面发起查询" style="margin-top:30px"></el-empty>
+                    </el-card>
+                </div>
+
+                <!-- Data Source Management -->
+                <div v-show="activeMenu==='datasource'">
+                    <el-card style="margin-bottom:15px">
+                        <template #header>
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <span><el-icon><InfoFilled/></el-icon> 数据导入与查看指引</span>
+                            </div>
+                        </template>
+                        <el-steps :active="3" finish-status="success" simple>
+                            <el-step title="配置主体模板" description="在'主体信息管理'定义字段"></el-step>
+                            <el-step title="新增/选择数据源" description="在下方列表编辑关联模板"></el-step>
+                            <el-step title="下载导入模板" description="按模板字段填入Excel"></el-step>
+                            <el-step title="导入IP主体数据" description="上传xlsx,自动入库"></el-step>
+                            <el-step title="查询与置信度" description="'IP主体信息查询'中验证"></el-step>
+                        </el-steps>
+                    </el-card>
+                    <el-card>
+                        <template #header>
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <span>数据源管理(共{{ dsTotal }}个)</span>
                                 <div>
                                     <el-button type="success" @click="downloadSubjectTemplate">下载导入模板</el-button>
                                     <el-upload :show-file-list="false" :before-upload="handleSubjectImport" accept=".xlsx">
