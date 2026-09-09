@@ -280,14 +280,58 @@ def healthz():
 
 @app.post("/api/login")
 def login(req: LoginRequest, request: Request):
+    from production import RateLimiter
+    client_ip = get_client_ip(request)
+    # 登录限流(10次/5分钟)
+    if not RateLimiter.check(f"login:{client_ip}", 10, 300):
+        raise HTTPException(429, "登录尝试过于频繁,请稍后再试")
     with get_conn() as conn:
         user = conn.execute("SELECT * FROM users WHERE username=? AND status='active'", (req.username,)).fetchone()
         if not user or user["password"] != hash_password(req.password):
+            log_operation(conn, "登录失败", req.username, str(request.url), f"用户{req.username}登录失败", client_ip)
             raise HTTPException(401, "用户名或密码错误")
         conn.execute("UPDATE users SET last_login=? WHERE id=?", (now_str(), user["id"]))
-        log_operation(conn, "登录", req.username, str(request.url), f"用户{req.username}登录成功", get_client_ip(request))
+        # 创建会话
         token = gen_id("tk_")
-        return {"token": token, "user": {"id": user["id"], "username": user["username"], "real_name": user["real_name"], "role": user["role"]}}
+        expire_at = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            "INSERT INTO user_sessions (id, user_id, token, login_at, expire_at, last_active_at, client_ip, user_agent, status) VALUES (?,?,?,?,?,?,?,?,?)",
+            (gen_id("sess_"), user["id"], token, now_str(), expire_at, now_str(), client_ip, request.headers.get("user-agent", ""), "active")
+        )
+        # 查询用户角色与权限
+        user_roles = conn.execute(
+            "SELECT r.* FROM user_roles ur JOIN roles r ON ur.role_id=r.id WHERE ur.user_id=? AND r.status='active'",
+            (user["id"],)
+        ).fetchall()
+        roles_data = []
+        all_perms = set()
+        all_menus = set()
+        for r in user_roles:
+            perms = json.loads(r["permissions"] or "[]")
+            menus = json.loads(r["menu_keys"] or "[]")
+            roles_data.append({"id": r["id"], "name": r["name"], "code": r["code"], "permissions": perms, "menu_keys": menus})
+            if "*" in perms:
+                all_perms = {"*"}
+                all_menus = {"*"}
+            else:
+                all_perms.update(perms)
+                all_menus.update(menus)
+        log_operation(conn, "登录", req.username, str(request.url), f"用户{req.username}登录成功", client_ip)
+        return {
+            "token": token,
+            "expire_at": expire_at,
+            "user": {
+                "id": user["id"],
+                "username": user["username"],
+                "real_name": user["real_name"],
+                "role": user["role"],
+                "phone": user["phone"],
+                "email": user["email"],
+                "roles": roles_data,
+                "permissions": list(all_perms),
+                "menu_keys": list(all_menus),
+            }
+        }
 
 
 # ============ 1. IP主体定位查询能力 ============

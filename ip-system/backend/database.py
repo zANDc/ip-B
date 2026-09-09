@@ -368,6 +368,234 @@ CREATE TABLE IF NOT EXISTS ip_access_rules (
     enabled INTEGER DEFAULT 1,
     created_at TEXT
 );
+
+-- ============ 落地能力扩展表 ============
+
+-- 角色表
+CREATE TABLE IF NOT EXISTS roles (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    code TEXT UNIQUE NOT NULL,
+    description TEXT,
+    permissions TEXT,            -- 权限编码JSON数组
+    menu_keys TEXT,              -- 可见菜单keys JSON数组
+    status TEXT DEFAULT 'active',
+    created_at TEXT,
+    updated_at TEXT
+);
+
+-- 用户扩展字段: 关联角色
+CREATE TABLE IF NOT EXISTS user_roles (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    role_id TEXT NOT NULL,
+    created_at TEXT,
+    UNIQUE(user_id, role_id)
+);
+
+-- 用户会话表(支持会话超时/单点登录控制)
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    login_at TEXT,
+    expire_at TEXT,
+    last_active_at TEXT,
+    client_ip TEXT,
+    user_agent TEXT,
+    status TEXT DEFAULT 'active'
+);
+
+-- 异步任务队列表
+CREATE TABLE IF NOT EXISTS async_tasks (
+    id TEXT PRIMARY KEY,
+    task_type TEXT,             -- batch_query/sync_datasource/import/export
+    task_name TEXT,
+    params TEXT,                -- JSON 参数
+    total_items INTEGER DEFAULT 0,
+    processed_items INTEGER DEFAULT 0,
+    success_items INTEGER DEFAULT 0,
+    failed_items INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'pending', -- pending/running/success/partial/failed/cancelled
+    progress INTEGER DEFAULT 0,  -- 0-100
+    result TEXT,                -- JSON 结果摘要
+    error_message TEXT,
+    submitter TEXT,
+    started_at TEXT,
+    finished_at TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+
+-- 告警规则表
+CREATE TABLE IF NOT EXISTS alarm_rules (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    rule_type TEXT,             -- data_conflict/query_volume/data_source_fail/login_abnormal
+    datasource_id TEXT,         -- 关联数据源(可选)
+    scene_id TEXT,              -- 关联场景(可选)
+    threshold INTEGER,          -- 阈值(次数/比例)
+    time_window INTEGER,        -- 时间窗口(秒)
+    notification_channel TEXT,  -- 通知方式 JSON: email/webhook/log
+    enabled INTEGER DEFAULT 1,
+    description TEXT,
+    last_triggered_at TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+
+-- 告警记录表
+CREATE TABLE IF NOT EXISTS alarm_records (
+    id TEXT PRIMARY KEY,
+    rule_id TEXT,
+    rule_name TEXT,
+    alarm_level TEXT,           -- info/warning/critical
+    alarm_content TEXT,
+    related_ip TEXT,
+    related_data TEXT,          -- JSON
+    status TEXT DEFAULT 'unhandled', -- unhandled/acknowledged/resolved
+    handler TEXT,
+    handle_remark TEXT,
+    triggered_at TEXT,
+    handled_at TEXT
+);
+
+-- 调度任务表(数据源同步/缓存刷新/统计)
+CREATE TABLE IF NOT EXISTS scheduled_jobs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    job_type TEXT,              -- sync_datasource/refresh_cache/cleanup/data_quality
+    cron_expression TEXT,       -- 标准5字段cron
+    params TEXT,                -- JSON
+    enabled INTEGER DEFAULT 1,
+    last_run_at TEXT,
+    last_run_status TEXT,
+    next_run_at TEXT,
+    description TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+
+-- 调度执行记录
+CREATE TABLE IF NOT EXISTS job_executions (
+    id TEXT PRIMARY KEY,
+    job_id TEXT,
+    started_at TEXT,
+    finished_at TEXT,
+    status TEXT,                -- success/failed/running
+    duration INTEGER,
+    result TEXT,                -- JSON
+    error_message TEXT
+);
+
+-- IP查询审计表(合规要求)
+CREATE TABLE IF NOT EXISTS query_audit (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    username TEXT,
+    query_type TEXT,            -- single/batch/import
+    query_params TEXT,          -- JSON: IP列表/时间范围
+    result_count INTEGER,
+    has_sensitive_access INTEGER DEFAULT 0, -- 是否触发了敏感字段访问
+    approved_by TEXT,           -- 敏感字段访问审批人
+    client_ip TEXT,
+    user_agent TEXT,
+    cost_ms INTEGER,
+    created_at TEXT
+);
+
+-- API限流配置表
+CREATE TABLE IF NOT EXISTS rate_limit_config (
+    id TEXT PRIMARY KEY,
+    api_path TEXT,
+    user_id TEXT,               -- 针对特定用户
+    role_code TEXT,             -- 针对特定角色
+    max_requests INTEGER,       -- 窗口内最大请求数
+    window_seconds INTEGER,     -- 窗口大小
+    enabled INTEGER DEFAULT 1,
+    description TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+
+-- 限流计数器(滑动窗口内存表)
+CREATE TABLE IF NOT EXISTS rate_limit_counter (
+    id TEXT PRIMARY KEY,
+    scope_key TEXT NOT NULL,    -- api_path + user_id 组合
+    window_start INTEGER,
+    request_count INTEGER DEFAULT 0,
+    UNIQUE(scope_key, window_start)
+);
+
+-- 字段脱敏策略表
+CREATE TABLE IF NOT EXISTS field_mask_policies (
+    id TEXT PRIMARY KEY,
+    field_name TEXT NOT NULL,
+    mask_type TEXT,             -- name/phone/id_card/email/ip/bank_card/address
+    mask_pattern TEXT,          -- 脱敏模式, 如 138****5678
+    enabled INTEGER DEFAULT 1,
+    description TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+
+-- 字段加密存储表(用于存储层加密的密钥配置)
+CREATE TABLE IF NOT EXISTS encryption_keys (
+    id TEXT PRIMARY KEY,
+    key_name TEXT UNIQUE,
+    key_value TEXT,             -- 生产环境应从KMS获取
+    algorithm TEXT,             -- AES-256-GCM/SM4
+    enabled INTEGER DEFAULT 1,
+    description TEXT,
+    created_at TEXT,
+    rotated_at TEXT
+);
+
+-- 导入导出任务关联表
+CREATE TABLE IF NOT EXISTS import_export_logs (
+    id TEXT PRIMARY KEY,
+    op_type TEXT,               -- import/export
+    op_format TEXT,             -- xlsx/csv/json
+    template_id TEXT,           -- 使用的模板ID
+    file_name TEXT,
+    file_size INTEGER,
+    total_rows INTEGER,
+    success_rows INTEGER,
+    failed_rows INTEGER,
+    error_detail TEXT,          -- JSON
+    operator TEXT,
+    created_at TEXT
+);
+
+-- 告警通知渠道配置
+CREATE TABLE IF NOT EXISTS notification_channels (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    channel_type TEXT,          -- email/webhook/log/sms
+    config TEXT,                -- JSON: 邮箱地址/webhook URL等
+    enabled INTEGER DEFAULT 1,
+    description TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+
+-- 系统配置表(全局开关)
+CREATE TABLE IF NOT EXISTS system_config (
+    id TEXT PRIMARY KEY,
+    config_key TEXT UNIQUE NOT NULL,
+    config_value TEXT,
+    config_group TEXT,          -- security/audit/feature
+    description TEXT,
+    updated_at TEXT,
+    updated_by TEXT
+);
+
+-- 索引
+CREATE INDEX IF NOT EXISTS idx_query_audit_user ON query_audit(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_query_audit_ip ON query_audit(query_params, created_at);
+CREATE INDEX IF NOT EXISTS idx_async_tasks_status ON async_tasks(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_alarm_records_status ON alarm_records(status, triggered_at);
+CREATE INDEX IF NOT EXISTS idx_conflict_tickets_status ON conflict_tickets(status, created_at);
 """
 
 
