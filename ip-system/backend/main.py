@@ -1978,6 +1978,7 @@ def dashboard_confidence(request: Request):
         ).fetchall()
         high = mid = low = 0
         distribution = {"高(>=85)": 0, "中(60-84)": 0, "低(<60)": 0}
+        details = []  # 每条IP的置信度明细
         for r in rows:
             sub = dict(r)
             ds_id = sub.get("data_source_id") or sub.get("source_id")
@@ -1999,6 +2000,17 @@ def dashboard_confidence(request: Request):
             else:
                 low += 1
                 distribution["低(<60)"] += 1
+            # 明细: IP+数据源+分数+三因素
+            details.append({
+                "ip_address": sub.get("ip_address"),
+                "scene_type": sub.get("scene_type"),
+                "source_subtype": sub.get("source_subtype"),
+                "source_name": ds["name"] if ds else "未关联",
+                "start_time": sub.get("start_time"),
+                "confidence": score.get("score"),
+                "confidence_label": label,
+                "detail": score.get("detail"),
+            })
         return {
             "total": len(rows),
             "high": high,
@@ -2006,6 +2018,7 @@ def dashboard_confidence(request: Request):
             "low": low,
             "distribution": distribution,
             "by_source": _confidence_by_source(conn),
+            "details": details,
         }
 
 

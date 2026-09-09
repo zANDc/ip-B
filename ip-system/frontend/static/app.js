@@ -71,11 +71,13 @@ const app = createApp({
         // 置信度统计
         const confidenceStats = ref(null);
         const confidenceBySource = ref([]);
+        const confidenceDetails = ref([]);  // 每条IP主体结果的置信度明细
         const loadConfidenceStats = async () => {
             try {
                 const r = await API('/api/dashboard/confidence');
                 confidenceStats.value = r;
                 confidenceBySource.value = r.by_source || [];
+                confidenceDetails.value = r.details || [];
             } catch(e) { ElMessage.error(e.message); }
         };
 
@@ -836,7 +838,7 @@ const app = createApp({
             token, loginForm, currentUser, handleLogin, logout,
             activeMenu, pageTitle, handleMenuSelect,
             stats, dashboardCards,
-            confidenceStats, confidenceBySource, loadConfidenceStats,
+            confidenceStats, confidenceBySource, confidenceDetails, loadConfidenceStats,
             queryForm, queryRules, queryLoading, queryResult, handleQuery, showPathReplay, viewPathReplay,
             showManualFixDialog, manualFixForm, showManualFix, submitManualFix,
             showSensitiveDialog, sensitiveForm, sensitiveResult, sensitiveVerifyCode, showSensitive, requestSensitiveApproval, verifySensitiveApproval,

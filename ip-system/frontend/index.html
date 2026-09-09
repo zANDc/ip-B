@@ -353,6 +353,43 @@
                                 </template>
                             </el-table-column>
                         </el-table>
+
+                        <h4 style="margin-top:20px">查询结果置信度明细(每条IP的实际计算结果)</h4>
+                        <el-table :data="confidenceDetails" border stripe size="small" max-height="420" v-if="confidenceDetails && confidenceDetails.length">
+                            <el-table-column type="index" label="#" width="50"></el-table-column>
+                            <el-table-column prop="ip_address" label="IP地址" width="140"></el-table-column>
+                            <el-table-column prop="scene_type" label="场景" width="80"></el-table-column>
+                            <el-table-column prop="source_subtype" label="数据子类" width="80"></el-table-column>
+                            <el-table-column prop="source_name" label="数据源" width="160" show-overflow-tooltip></el-table-column>
+                            <el-table-column prop="start_time" label="起始时间" width="160"></el-table-column>
+                            <el-table-column label="权威性" width="90" align="center">
+                                <template #default="{row}">
+                                    <el-tag size="small" effect="plain">{{row.detail.authority.score}}%</el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="完整度" width="100" align="center">
+                                <template #default="{row}">
+                                    <el-tooltip :content="`${row.detail.completeness.filled}/${row.detail.completeness.total} 字段非空`" placement="top">
+                                        <el-tag size="small" effect="plain" type="success">{{row.detail.completeness.score}}%</el-tag>
+                                    </el-tooltip>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="新鲜度" width="100" align="center">
+                                <template #default="{row}">
+                                    <el-tag size="small" effect="plain" type="warning">
+                                        {{row.detail.freshness.score}}%
+                                        <span v-if="row.detail.freshness.days!==null" style="opacity:.7">({{row.detail.freshness.days}}天前)</span>
+                                    </el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="综合置信度" width="140" align="center" fixed="right">
+                                <template #default="{row}">
+                                    <el-tag :type="row.confidence_label==='高'?'success':row.confidence_label==='中'?'warning':'danger'" effect="dark">
+                                        {{row.confidence}}% ({{row.confidence_label}})
+                                    </el-tag>
+                                </template>
+                            </el-table-column>
+                        </el-table>
                         <el-empty v-if="!confidenceStats || !confidenceStats.total" description="暂无查询结果数据,请先在'IP主体信息查询'页面发起查询" style="margin-top:30px"></el-empty>
                     </el-card>
                 </div>
