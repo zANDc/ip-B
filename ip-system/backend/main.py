@@ -1754,10 +1754,14 @@ def translate_code(
 
 
 def enrich_results_with_dictionary(conn, results):
-    """Add translated CITY_NAME (and other dict-derived fields) to each result dict.
+    """Add translated CITY_NAME (and other dict-derived fields) + confidence score to each result dict.
 
     Iterates over a list of sqlite3.Row/dict and enriches each row with
-    additional fields derived from the data dictionary (CITY_ID -> CITY_NAME).
+    additional fields derived from the data dictionary (CITY_ID -> CITY_NAME),
+    plus a confidence score computed from:
+      - data source authority level (高/中/低)
+      - field completeness (non-empty field ratio)
+      - time freshness (recency of start_time)
     Returns a new list of plain dicts (does not mutate input).
     """
     if not results:
@@ -1777,6 +1781,21 @@ def enrich_results_with_dictionary(conn, results):
             list(city_codes),
         ).fetchall()
         city_map = {row["dict_code"]: row["dict_name"] for row in rows}
+
+    # Cache data source authority levels for confidence scoring
+    ds_auth_map = {}
+    ds_names = {rd.get("data_source") for r in results for rd in [dict(r) if not isinstance(r, dict) else r] if rd.get("data_source")}
+    if ds_names:
+        placeholders = ",".join(["?"] * len(ds_names))
+        auth_rows = conn.execute(
+            f"SELECT name, authority_level FROM data_sources WHERE name IN ({placeholders})",
+            list(ds_names),
+        ).fetchall()
+        ds_auth_map = {row["name"]: row["authority_level"] for row in auth_rows}
+
+    from datetime import datetime, timedelta
+    now = datetime.now()
+
     enriched = []
     for r in results:
         rd = dict(r) if not isinstance(r, dict) else dict(r)
@@ -1785,6 +1804,64 @@ def enrich_results_with_dictionary(conn, results):
         # Auto-fill location field if empty but we know the city name
         if not rd.get("location") and rd.get("city_name"):
             rd["location"] = rd["city_name"]
+
+        # ---- Confidence scoring ----
+        # 1) Authority weight (50%): 高=0.95, 中=0.75, 低=0.55, unknown=0.60
+        ds_name = rd.get("data_source") or ""
+        auth = ds_auth_map.get(ds_name, "")
+        if auth == "高":
+            auth_score = 0.95
+        elif auth == "中":
+            auth_score = 0.75
+        elif auth == "低":
+            auth_score = 0.55
+        else:
+            auth_score = 0.60
+
+        # 2) Completeness weight (30%): ratio of non-empty meaningful fields
+        skip_cols = {"id", "created_at", "raw_data", "ip_version", "scene_type"}
+        meaningful_keys = [k for k in rd.keys() if k not in skip_cols]
+        non_empty = sum(1 for k in meaningful_keys if rd.get(k) not in (None, "", "-"))
+        comp_score = (non_empty / len(meaningful_keys)) if meaningful_keys else 0.0
+
+        # 3) Freshness weight (20%): based on start_time recency
+        fresh_score = 0.4
+        dt = None
+        try:
+            st = rd.get("start_time") or ""
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d", "%Y-%m-%d"):
+                try:
+                    dt = datetime.strptime(st[:19] if len(st) >= 19 else st, fmt)
+                    break
+                except Exception:
+                    dt = None
+            if dt:
+                days = (now - dt).days
+                if days <= 7:
+                    fresh_score = 1.0
+                elif days <= 30:
+                    fresh_score = 0.8
+                elif days <= 90:
+                    fresh_score = 0.6
+                elif days <= 365:
+                    fresh_score = 0.5
+                else:
+                    fresh_score = 0.4
+        except Exception:
+            fresh_score = 0.4
+
+        confidence = round((auth_score * 0.5 + comp_score * 0.3 + fresh_score * 0.2) * 100, 1)
+        rd["confidence"] = confidence
+        rd["confidence_detail"] = {
+            "authority": {"score": round(auth_score * 100, 1), "level": auth or "未知", "weight": "50%"},
+            "completeness": {"score": round(comp_score * 100, 1), "filled": non_empty, "total": len(meaningful_keys), "weight": "30%"},
+            "freshness": {"score": round(fresh_score * 100, 1), "days": (now - dt).days if dt else None, "weight": "20%"},
+        }
+        rd["confidence_label"] = (
+            "高" if confidence >= 80 else
+            "中" if confidence >= 60 else
+            "低"
+        )
         enriched.append(rd)
     return enriched
 
